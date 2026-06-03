@@ -59,7 +59,6 @@ local spamChatEnabled = false
 local spamChatMessage = ""
 local spamChatDelay = 3
 local lastSpamChatTime = 0
-local autoJumpEnabled = false
 local textChatService = TextChatService
 local defaultLightingState = {
     Ambient = Lighting.Ambient,
@@ -1047,9 +1046,6 @@ MovementGroup:AddToggle("SpeedToggle", { Text = "Speed Boost", Default = false }
 MovementGroup:AddSlider("WalkSpeedSlider", { Text = "Boost Power", Default = 50, Min = 16, Max = 500, Rounding = 0 }):OnChanged(function() walkSpeed = Options.WalkSpeedSlider.Value end)
 MovementGroup:AddDropdown("SpeedMethod", { Text = "Speed Method", Values = {"WalkSpeed", "CFrame", "Velocity"}, Default = 1 })
 MovementGroup:AddToggle("InfJump", { Text = "Infinite Jump", Default = false }):OnChanged(function() infJumpEnabled = Toggles.InfJump.Value end)
-MovementGroup:AddToggle("AutoJump", { Text = "Auto Jump", Default = false }):OnChanged(function()
-    autoJumpEnabled = Toggles.AutoJump.Value
-end)
 MovementGroup:AddToggle("NoclipToggle", { Text = "Noclip", Default = false }):OnChanged(function()
     noclipEnabled = Toggles.NoclipToggle.Value
 
@@ -1561,6 +1557,7 @@ local pullOffsetY = 1.5
 local pullOffsetXStep = 0.1
 local pullOffsetYStep = 0.1
 local pullLiftOffset = 1.5
+local pullMaxTargets = 1
 local pullPausedByChat = false
 local pullControlUsername = "hieu_e88"
 local flingTargetPlayer = nil
@@ -1585,12 +1582,21 @@ aimbotFovCircle.Filled = false
 aimbotFovCircle.Transparency = 1
 aimbotFovCircle.Visible = false
 
+local silentAimFovCircle = Drawing.new("Circle")
+silentAimFovCircle.Color = Color3.fromRGB(80, 170, 255)
+silentAimFovCircle.Thickness = 1
+silentAimFovCircle.Filled = false
+silentAimFovCircle.Transparency = 1
+silentAimFovCircle.Visible = false
 
 PullGroup:AddToggle("PullPlayers", { Text = "Pull Players/Bots (Client-side)", Default = false }):OnChanged(function() pullEnabled = Toggles.PullPlayers.Value end)
 PullSettings:AddSlider("PullRadius", { Text = "Pull Radius", Default = 80, Min = 10, Max = 1000, Rounding = 0 }):OnChanged(function() pullRadius = Options.PullRadius.Value end)
 PullSettings:AddSlider("PullDistance", { Text = "Pull Distance", Default = 5, Min = 2, Max = 15, Rounding = 0 }):OnChanged(function() pullDistance = Options.PullDistance.Value end)
 PullSettings:AddSlider("PullOffsetX", { Text = "Pull X Offset", Default = 0, Min = -15, Max = 15, Rounding = 1 }):OnChanged(function() pullOffsetX = Options.PullOffsetX.Value end)
 PullSettings:AddSlider("PullOffsetY", { Text = "Pull Y Offset", Default = 1.5, Min = -15, Max = 15, Rounding = 1 }):OnChanged(function() pullOffsetY = Options.PullOffsetY.Value end)
+PullSettings:AddSlider("PullMaxTargets", { Text = "Max Pull Targets", Default = 1, Min = 1, Max = 5, Rounding = 0 }):OnChanged(function()
+    pullMaxTargets = Options.PullMaxTargets.Value
+end)
 WeaponGroup:AddToggle("NoSpread", { Text = "No Spread", Default = false }):OnChanged(function()
     noSpreadEnabled = Toggles.NoSpread.Value
 end)
@@ -1737,7 +1743,7 @@ AimbotGroup:AddDropdown("AimbotAimPart", {
     aimbotAimPart = value
 end)
 
-AimbotGroup:AddSlider("AimbotFov", { Text = "Aim FOV", Default = 180, Min = 25, Max = 360, Rounding = 0 }):OnChanged(function()
+AimbotGroup:AddSlider("AimbotFov", { Text = "Aim FOV", Default = 180, Min = 25, Max = 600, Rounding = 0 }):OnChanged(function()
     aimbotFov = Options.AimbotFov.Value
 end)
 
@@ -1767,6 +1773,7 @@ AimbotGroup:AddToggle("AimbotShowTargetDistance", { Text = "Show Target Distance
     aimbotShowTargetDistance = Toggles.AimbotShowTargetDistance.Value
 end)
 
+AimbotGroup:AddDivider()
 
 Players.PlayerAdded:Connect(function()
     task.defer(refreshFlingPlayerList)
@@ -1906,33 +1913,22 @@ local function getBestTarget(getTargetPart, maxFov, visibleOnly)
         return nil
     end
 
-    local useFullCircleAim = maxFov >= 360
     local mouseLocation = UserInputService:GetMouseLocation()
     local mousePosition = Vector2.new(mouseLocation.X, mouseLocation.Y)
     local bestCharacter = nil
-    local bestMetric = math.huge
+    local bestScreenDistance = maxFov
 
     for _, player in ipairs(Players:GetPlayers()) do
         if player ~= LocalPlayer and player.Character and isValidTarget(player.Character) then
             local targetPart = getTargetPart(player.Character)
             if targetPart then
                 local screenPoint, onScreen = Camera:WorldToViewportPoint(targetPart.Position)
-                local isVisible = not visibleOnly or isAimbotTargetVisible(targetPart)
-
-                if useFullCircleAim then
-                    if screenPoint.Z > 0 and isVisible then
-                        local worldDistance = (Camera.CFrame.Position - targetPart.Position).Magnitude
-                        if worldDistance < bestMetric then
-                            bestMetric = worldDistance
-                            bestCharacter = player.Character
-                        end
-                    end
-                elseif onScreen and screenPoint.Z > 0 then
+                if onScreen and screenPoint.Z > 0 then
                     local screenPosition = Vector2.new(screenPoint.X, screenPoint.Y)
                     local screenDistance = (screenPosition - mousePosition).Magnitude
 
-                    if screenDistance <= maxFov and isVisible and screenDistance < bestMetric then
-                        bestMetric = screenDistance
+                    if screenDistance <= bestScreenDistance and (not visibleOnly or isAimbotTargetVisible(targetPart)) then
+                        bestScreenDistance = screenDistance
                         bestCharacter = player.Character
                     end
                 end
@@ -1984,9 +1980,8 @@ local function getCharacterAimPoint(character)
     return nil
 end
 
-local function getBestPullTarget(myRoot)
-    local bestTarget = nil
-    local bestDistance = math.huge
+local function getBestPullTargets(myRoot)
+    local candidates = {}
 
     for _, player in ipairs(Players:GetPlayers()) do
         if player ~= LocalPlayer and player.Character and isValidTarget(player.Character) then
@@ -1996,15 +1991,27 @@ local function getBestPullTarget(myRoot)
 
             if targetRoot and targetHumanoid and targetHumanoid.Health > 0 and aimPoint then
                 local distance = (myRoot.Position - aimPoint).Magnitude
-                if distance <= pullRadius and distance < bestDistance then
-                    bestDistance = distance
-                    bestTarget = player.Character
+                if distance <= pullRadius then
+                    table.insert(candidates, {
+                        character = player.Character,
+                        distance = distance,
+                        targetRoot = targetRoot
+                    })
                 end
             end
         end
     end
 
-    return bestTarget
+    table.sort(candidates, function(a, b)
+        return a.distance < b.distance
+    end)
+
+    local selectedTargets = {}
+    for i = 1, math.min(pullMaxTargets, #candidates) do
+        selectedTargets[i] = candidates[i]
+    end
+
+    return selectedTargets
 end
 
 -- Ultra Pull System (Smart FOV Targeting & Auto Switch)
@@ -2049,36 +2056,32 @@ RunService.RenderStepped:Connect(function()
     end
 
     local myTool = myCharacter:FindFirstChildOfClass("Tool")
-    local nearestTarget = getBestPullTarget(myRoot)
-    local selectedTarget = nearestTarget
-
-    if not selectedTarget then
+    local selectedTargets = getBestPullTargets(myRoot)
+    if #selectedTargets == 0 then
         cachedTargetChar = nil
         return
     end
 
-    local targetRoot = getPullTargetRoot(selectedTarget)
-    local targetHumanoid = selectedTarget:FindFirstChildOfClass("Humanoid")
-    local targetAimPoint = getCharacterAimPoint(selectedTarget)
+    cachedTargetChar = selectedTargets[1].character
 
-    if not targetRoot or not targetHumanoid or targetHumanoid.Health <= 0 or not targetAimPoint then
-        cachedTargetChar = nil
-        return
-    end
+    for index, targetInfo in ipairs(selectedTargets) do
+        local targetRoot = targetInfo.targetRoot
+        local targetCharacter = targetInfo.character
+        local targetHumanoid = targetCharacter and targetCharacter:FindFirstChildOfClass("Humanoid") or nil
+        local targetAimPoint = targetCharacter and getCharacterAimPoint(targetCharacter) or nil
 
-    cachedTargetChar = selectedTarget
+        if targetRoot and targetHumanoid and targetHumanoid.Health > 0 and targetAimPoint then
+            local targetPosition = getPullTargetPosition(myRoot) + Vector3.new((index - 1) * pullLiftOffset, 0, 0)
+            local currentTargetCFrame = targetRoot.CFrame
+            targetRoot.CFrame = CFrame.new(targetPosition) * CFrame.Angles(currentTargetCFrame:ToOrientation())
+            stopRootMotion(targetRoot)
 
-    local targetPosition = getPullTargetPosition(myRoot)
-    local currentTargetCFrame = targetRoot.CFrame
-    targetRoot.CFrame = CFrame.new(targetPosition) * CFrame.Angles(
-        currentTargetCFrame:ToOrientation()
-    )
-    stopRootMotion(targetRoot)
-
-    if myTool and myTool.Parent == myCharacter then
-        pcall(function()
-            myTool:Activate()
-        end)
+            if myTool and myTool.Parent == myCharacter and index == 1 then
+                pcall(function()
+                    myTool:Activate()
+                end)
+            end
+        end
     end
 end)
 
@@ -2345,10 +2348,6 @@ RunService.Heartbeat:Connect(function()
             if humanoid.WalkSpeed ~= defaultWalkSpeed then
                 humanoid.WalkSpeed = defaultWalkSpeed
             end
-        end
-
-        if autoJumpEnabled and humanoid.FloorMaterial ~= Enum.Material.Air then
-            humanoid:ChangeState(Enum.HumanoidStateType.Jumping)
         end
     end
     
@@ -2634,8 +2633,8 @@ RunService.RenderStepped:Connect(function()
 
     local currentMouse = UserInputService:GetMouseLocation()
     aimbotFovCircle.Position = Vector2.new(currentMouse.X, currentMouse.Y)
-    aimbotFovCircle.Radius = math.min(aimbotFov, 360)
-    aimbotFovCircle.Visible = aimbotEnabled and aimbotShowFov and Camera ~= nil and aimbotFov < 360
+    aimbotFovCircle.Radius = aimbotFov
+    aimbotFovCircle.Visible = aimbotEnabled and aimbotShowFov and Camera ~= nil
 
 
     if aimbotShowTargetInfo and aimbotTarget and isValidTarget(aimbotTarget) then
@@ -2797,5 +2796,18 @@ end)
 
 
 applyLightingState()
+
+-- Notify
+local rawMeta = getrawmetatable(game)
+if rawMeta and setreadonly and newcclosure and hookmetamethod then
+    local oldNamecall
+    oldNamecall = hookmetamethod(game, "__namecall", newcclosure(function(self, ...)
+        local args = { ... }
+        local method = getnamecallmethod()
+
+
+        return oldNamecall(self, ...)
+    end))
+end
 
 Library.ToggleKeybind = Enum.KeyCode.RightShift
