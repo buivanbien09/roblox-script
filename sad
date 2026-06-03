@@ -3,7 +3,7 @@
     LinoriaLib GUI - Modern ESP Updated
 ]]
 
--- User message noted: "xin chaoff"
+-- author Bien
 
 -- Load LinoriaLib
 local repo = "https://raw.githubusercontent.com/violin-suzutsuki/LinoriaLib/main/"
@@ -1028,7 +1028,7 @@ end
 
 -- Create Window
 local Window = Library:CreateWindow({
-    Title = "Universal Hub v3.0",
+    Title = "SayGex69",
     Center = true,
     AutoShow = true,
     TabPadding = 8,
