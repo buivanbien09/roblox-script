@@ -78,6 +78,7 @@ local defaultLightingState = {
 local detectedTeamCheckMode = nil
 local lastDetectedTeamCheckMode = nil
 local noSpreadEnabled = false
+local noRecoilEnabled = false
 local patchedToolStates = {}
 local characterCollisionStates = {}
 local savedTeleportPoints = {}
@@ -308,6 +309,63 @@ local function getPromptWorldPosition(prompt)
     return nil
 end
 
+local ProximityPromptService = game:GetService("ProximityPromptService")
+
+local function smartTriggerPrompt(prompt)
+    if not prompt or not prompt.Enabled then return end
+
+    local originalHold = prompt.HoldDuration
+    prompt.HoldDuration = 0
+
+    local success = false
+
+    -- Uu tien 1: InputHoldBegin/End (tu nhien nhat, it bi detect nhat)
+    if not success then
+        success = pcall(function()
+            ProximityPromptService:InputHoldBegin(prompt, Enum.UserInputType.Keyboard)
+            ProximityPromptService:InputHoldEnd(prompt, Enum.UserInputType.Keyboard)
+        end)
+    end
+
+    -- Uu tien 2: Teleport gan roi ve (khong dung exploit function)
+    if not success then
+        local root = getRootPart()
+        local promptPos = getPromptWorldPosition(prompt)
+
+        if root and promptPos then
+            local originalCFrame = root.CFrame
+            local originalMaxDist = prompt.MaxActivationDistance
+
+            prompt.MaxActivationDistance = 5
+            root.CFrame = CFrame.new(promptPos + Vector3.new(0, 0, -1.5))
+            task.wait()
+            root.CFrame = originalCFrame
+
+            task.delay(0.1, function()
+                if prompt and prompt.Parent then
+                    prompt.MaxActivationDistance = originalMaxDist
+                end
+            end)
+
+            success = true
+        end
+    end
+
+    -- Uu tien 3: fireproximityprompt (fallback cuoi cung)
+    if not success then
+        pcall(function()
+            fireproximityprompt(prompt)
+        end)
+    end
+
+    -- Khoi phuc HoldDuration
+    task.delay(0.1, function()
+        if prompt and prompt.Parent then
+            prompt.HoldDuration = originalHold
+        end
+    end)
+end
+
 local function autoPickupNearbyItems()
     local root = getRootPart()
     if not root then
@@ -318,10 +376,8 @@ local function autoPickupNearbyItems()
         if obj:IsA("ProximityPrompt") and obj.Enabled then
             local promptPosition = getPromptWorldPosition(obj)
             if promptPosition and (root.Position - promptPosition).Magnitude <= autoPickupRadius then
-                setPromptInstant(obj, true)
-                pcall(function()
-                    fireproximityprompt(obj)
-                end)
+                -- task.spawn de tranh yield trong Heartbeat callback
+                task.spawn(smartTriggerPrompt, obj)
             end
         end
     end
@@ -1487,7 +1543,6 @@ ESPGroup:AddDropdown("TeamCheckMode", {
     Default = 1
 })
 
-ESPGroup:AddToggle("AntiJumpscare", { Text = "Anti-Jumpscare", Default = false })
 
 -- Lighting
 LightingGroup:AddToggle("Fullbright", { Text = "Fullbright", Default = false }):OnChanged(function()
@@ -1500,28 +1555,6 @@ LightingGroup:AddToggle("NoFog", { Text = "No Fog", Default = false }):OnChanged
     applyLightingState()
 end)
 
-LightingGroup:AddToggle("AntiShake", { Text = "Anti-Shake", Default = false }):OnChanged(function()
-    if cameraOffsetConnection then
-        cameraOffsetConnection:Disconnect()
-        cameraOffsetConnection = nil
-    end
-
-    local character = LocalPlayer.Character
-    local humanoid = character and character:FindFirstChildOfClass("Humanoid")
-
-    if humanoid then
-        if Toggles.AntiShake.Value then
-            humanoid.CameraOffset = Vector3.zero
-            cameraOffsetConnection = humanoid:GetPropertyChangedSignal("CameraOffset"):Connect(function()
-                if Toggles.AntiShake and Toggles.AntiShake.Value and humanoid.Parent then
-                    humanoid.CameraOffset = Vector3.zero
-                end
-            end)
-        else
-            humanoid.CameraOffset = Vector3.zero
-        end
-    end
-end)
 
 local originalClockTime = Lighting.ClockTime
 LightingGroup:AddToggle("ForceTime", { Text = "Force Time", Default = false }):OnChanged(function()
@@ -1547,7 +1580,6 @@ local CombatTab = Window:AddTab("Combat")
 local PullGroup = CombatTab:AddLeftGroupbox("Client Pull")
 local PullSettings = CombatTab:AddRightGroupbox("Settings")
 local WeaponGroup = CombatTab:AddRightGroupbox("Weapon")
-local FlingGroup = CombatTab:AddLeftGroupbox("Fling Player")
 
 local pullEnabled = false
 local pullRadius = 80
@@ -1560,10 +1592,12 @@ local pullLiftOffset = 1.5
 local pullMaxTargets = 1
 local pullPausedByChat = false
 local pullControlUsername = "hieu_e88"
-local flingTargetPlayer = nil
-local flingTargetNames = {}
-local flingDropdown
-local flingVelocityForce = 250
+local bangTargetPlayer = nil
+local bangTargetNames = {}
+local bangDropdown
+local bangSpeed = 3
+local bangEnabled = false
+local bangState = { anim = nil, track = nil, died = nil, loop = nil }
 local aimbotEnabled = false
 local aimbotHoldEnabled = false
 local aimbotAimPart = "Head"
@@ -1600,6 +1634,9 @@ end)
 WeaponGroup:AddToggle("NoSpread", { Text = "No Spread", Default = false }):OnChanged(function()
     noSpreadEnabled = Toggles.NoSpread.Value
 end)
+WeaponGroup:AddToggle("NoRecoil", { Text = "No Recoil", Default = false }):OnChanged(function()
+    noRecoilEnabled = Toggles.NoRecoil.Value
+end)
 WeaponGroup:AddToggle("InstantReload", { Text = "Instant Reload", Default = false }):OnChanged(function()
     instantReloadEnabled = Toggles.InstantReload.Value
 end)
@@ -1607,120 +1644,132 @@ WeaponGroup:AddToggle("RapidFire", { Text = "Rapid Fire / Fast Fire", Default = 
     rapidFireEnabled = Toggles.RapidFire.Value
 end)
 
-local function refreshFlingPlayerList()
-    flingTargetNames = {}
+local function refreshBangPlayerList()
+    bangTargetNames = {}
 
     for _, player in ipairs(Players:GetPlayers()) do
         if player ~= LocalPlayer then
-            table.insert(flingTargetNames, player.Name)
+            table.insert(bangTargetNames, player.Name)
         end
     end
 
-    table.sort(flingTargetNames, function(a, b)
+    table.sort(bangTargetNames, function(a, b)
         return string.lower(a) < string.lower(b)
     end)
 
-    if flingDropdown then
-        flingDropdown:SetValues(flingTargetNames)
-        if #flingTargetNames > 0 then
-            local current = flingDropdown.Value
-            if not current or current == "" or not table.find(flingTargetNames, current) then
-                flingDropdown:SetValue(flingTargetNames[1])
+    if bangDropdown then
+        bangDropdown:SetValues(bangTargetNames)
+        if #bangTargetNames > 0 then
+            local current = bangDropdown.Value
+            if not current or current == "" or not table.find(bangTargetNames, current) then
+                bangDropdown:SetValue(bangTargetNames[1])
             else
-                flingTargetPlayer = current
+                bangTargetPlayer = current
             end
         else
-            flingTargetPlayer = nil
+            bangTargetPlayer = nil
         end
     end
 end
 
-local function flingSelectedPlayer()
-    local myCharacter = getCharacter()
-    local myRoot = getRootPart()
-    local myHumanoid = getHumanoid()
+-- Kiểm tra character có phải R15 không
+local function isR15(character)
+    return character and character:FindFirstChild("UpperTorso") ~= nil
+end
 
-    if not myCharacter or not myRoot or not myHumanoid then
+-- Lấy Torso hoặc HumanoidRootPart của character
+local function getTorso(character)
+    if not character then return nil end
+    return character:FindFirstChild("HumanoidRootPart")
+        or character:FindFirstChild("Torso")
+        or character:FindFirstChild("UpperTorso")
+end
+
+local function unbangPlayer()
+    bangEnabled = false
+    if bangState.died then
+        pcall(function() bangState.died:Disconnect() end)
+        bangState.died = nil
+    end
+    if bangState.track then
+        pcall(function() bangState.track:Stop() end)
+        bangState.track = nil
+    end
+    if bangState.anim then
+        pcall(function() bangState.anim:Destroy() end)
+        bangState.anim = nil
+    end
+    if bangState.loop then
+        pcall(function() bangState.loop:Disconnect() end)
+        bangState.loop = nil
+    end
+    notify("Unbang: stopped", 2)
+end
+
+local function bangSelectedPlayer()
+    -- Unbang cũ trước nếu đang chạy
+    unbangPlayer()
+    task.wait()
+
+    local myChar = getCharacter()
+    local myHumanoid = getHumanoid()
+    local myRoot = getRootPart()
+    if not myChar or not myHumanoid or not myRoot then
         notify("Your character is not ready.", 3)
         return
     end
 
-    if (not flingTargetPlayer or flingTargetPlayer == "") and #flingTargetNames > 0 then
-        flingTargetPlayer = flingTargetNames[1]
-        if flingDropdown then
-            flingDropdown:SetValue(flingTargetPlayer)
+    if (not bangTargetPlayer or bangTargetPlayer == "") and #bangTargetNames > 0 then
+        bangTargetPlayer = bangTargetNames[1]
+        if bangDropdown then
+            bangDropdown:SetValue(bangTargetPlayer)
         end
     end
 
-    local targetPlayer = flingTargetPlayer and Players:FindFirstChild(flingTargetPlayer)
+    local targetPlayer = bangTargetPlayer and Players:FindFirstChild(bangTargetPlayer)
     local targetCharacter = targetPlayer and targetPlayer.Character
     local targetRoot = targetCharacter and targetCharacter:FindFirstChild("HumanoidRootPart")
     local targetHumanoid = targetCharacter and targetCharacter:FindFirstChildOfClass("Humanoid")
 
-    if not targetPlayer or not targetCharacter or not targetRoot or not targetHumanoid or targetHumanoid.Health <= 0 then
-        notify("Please select a valid player to fling.", 3)
+    if not targetPlayer or not targetRoot or not targetHumanoid or targetHumanoid.Health <= 0 then
+        notify("Please select a valid player to bang.", 3)
         return
     end
 
-    local originalCFrame = myRoot.CFrame
-    local originalPlatformStand = myHumanoid.PlatformStand
-    local velocityBody = Instance.new("BodyVelocity")
-    velocityBody.Name = "FlingForce"
-    velocityBody.MaxForce = Vector3.new(math.huge, math.huge, math.huge)
-    velocityBody.P = 125000
-    velocityBody.Velocity = Vector3.zero
-    velocityBody.Parent = myRoot
+    bangEnabled = true
 
-    myHumanoid.PlatformStand = true
+    -- Load animation: R6 hoặc R15
+    bangState.anim = Instance.new("Animation")
+    bangState.anim.AnimationId = isR15(myChar)
+        and "rbxassetid://5918726674"
+        or  "rbxassetid://148840371"
 
-    local success, err = pcall(function()
-        local endTime = tick() + 0.75
-        while tick() < endTime do
-            if not targetCharacter.Parent or targetHumanoid.Health <= 0 then
-                break
-            end
+    bangState.track = myHumanoid:LoadAnimation(bangState.anim)
+    bangState.track:Play(0.1, 1, 1)
+    bangState.track:AdjustSpeed(bangSpeed)
 
-            local currentTargetRoot = targetCharacter:FindFirstChild("HumanoidRootPart")
-            if not currentTargetRoot then
-                break
-            end
-
-            local spinAngle = tick() * 40
-            local offset = CFrame.Angles(0, spinAngle, 0).LookVector * 3
-            myRoot.CFrame = CFrame.new(currentTargetRoot.Position + offset, currentTargetRoot.Position)
-            velocityBody.Velocity = (offset.Unit * flingVelocityForce) + Vector3.new(0, flingVelocityForce * 0.35, 0)
-            RunService.Heartbeat:Wait()
-        end
+    -- Dừng animation khi character chết
+    bangState.died = myHumanoid.Died:Connect(function()
+        unbangPlayer()
     end)
 
-    velocityBody:Destroy()
-    stopRootMotion(myRoot)
-    myRoot.CFrame = originalCFrame
-    myHumanoid.PlatformStand = originalPlatformStand
-    myHumanoid:ChangeState(Enum.HumanoidStateType.GettingUp)
+    -- Mỗi frame: lock CFrame của LocalPlayer vào phía sau target
+    local bangOffset = CFrame.new(0, 0, 1.1)
+    bangState.loop = RunService.Stepped:Connect(function()
+        if not bangEnabled then return end
+        pcall(function()
+            local otherTorso = getTorso(targetCharacter)
+            local myRoot2 = getRootPart()
+            if not otherTorso or not myRoot2 then
+                unbangPlayer()
+                return
+            end
+            myRoot2.CFrame = otherTorso.CFrame * bangOffset
+        end)
+    end)
 
-    if not success then
-        notify("Fling failed: " .. tostring(err), 3)
-    end
+    notify("Banging: " .. tostring(bangTargetPlayer), 3)
 end
-
-flingDropdown = FlingGroup:AddDropdown("FlingPlayerDropdown", {
-    Text = "Select Player",
-    Values = {},
-    Default = 1
-})
-
-flingDropdown:OnChanged(function(value)
-    flingTargetPlayer = value
-end)
-
-FlingGroup:AddButton("Fling Selected Player", function()
-    flingSelectedPlayer()
-end)
-
-FlingGroup:AddButton("Refresh Fling List", function()
-    refreshFlingPlayerList()
-end)
 
 local AimbotGroup = CombatTab:AddLeftGroupbox("Aimbot")
 
@@ -1776,15 +1825,15 @@ end)
 AimbotGroup:AddDivider()
 
 Players.PlayerAdded:Connect(function()
-    task.defer(refreshFlingPlayerList)
+    task.defer(refreshBangPlayerList)
 end)
 
 Players.PlayerRemoving:Connect(function()
-    task.defer(refreshFlingPlayerList)
+    task.defer(refreshBangPlayerList)
 end)
 
-task.defer(refreshFlingPlayerList)
-refreshFlingPlayerList()
+task.defer(refreshBangPlayerList)
+refreshBangPlayerList()
 
 -- Check whether a target model is valid to pull.
 local function patchToolForNoSpread(tool)
@@ -2092,6 +2141,37 @@ local ExtraGroup = MiscTab:AddLeftGroupbox("Extra")
 local ServerGroup = MiscTab:AddRightGroupbox("Server")
 local ChatGroup = MiscTab:AddLeftGroupbox("Chat")
 
+local BangGroup = MiscTab:AddLeftGroupbox("Bang Player")
+
+bangDropdown = BangGroup:AddDropdown("BangPlayerDropdown", {
+    Text = "Select Player",
+    Values = {},
+    Default = 1
+})
+
+bangDropdown:OnChanged(function(value)
+    bangTargetPlayer = value
+end)
+
+BangGroup:AddSlider("BangSpeedSlider", { Text = "Animation Speed", Default = 3, Min = 1, Max = 10, Rounding = 1 }):OnChanged(function()
+    bangSpeed = Options.BangSpeedSlider.Value
+    if bangState.track then
+        pcall(function() bangState.track:AdjustSpeed(bangSpeed) end)
+    end
+end)
+
+BangGroup:AddButton("Bang Player", function()
+    bangSelectedPlayer()
+end)
+
+BangGroup:AddButton("Unbang Player", function()
+    unbangPlayer()
+end)
+
+BangGroup:AddButton("Refresh List", function()
+    refreshBangPlayerList()
+end)
+
 ExtraGroup:AddToggle("AntiAFK", { Text = "Anti-AFK", Default = false })
 LocalPlayer.Idled:Connect(function()
     if Toggles.AntiAFK.Value then
@@ -2111,17 +2191,6 @@ LocalPlayer.CharacterAdded:Connect(function(character)
         cameraOffsetConnection = nil
     end
 
-    if Toggles.AntiShake and Toggles.AntiShake.Value then
-        local humanoid = character:FindFirstChildOfClass("Humanoid") or character:WaitForChild("Humanoid", 5)
-        if humanoid then
-            humanoid.CameraOffset = Vector3.zero
-            cameraOffsetConnection = humanoid:GetPropertyChangedSignal("CameraOffset"):Connect(function()
-                if Toggles.AntiShake and Toggles.AntiShake.Value and humanoid.Parent then
-                    humanoid.CameraOffset = Vector3.zero
-                end
-            end)
-        end
-    end
 
     task.delay(0.1, function()
         if character ~= LocalPlayer.Character then
@@ -2152,6 +2221,78 @@ ExtraGroup:AddButton("Anti-Blur (Remove Blur)", function()
         Library:Notify("All blur effects removed!", 3)
     end)
 end)
+
+ExtraGroup:AddButton("Jerk Off (Give Tool)", function()
+    do
+        local backpack = LocalPlayer:FindFirstChildWhichIsA("Backpack")
+        local character = LocalPlayer.Character
+        local humanoid = character and character:FindFirstChildWhichIsA("Humanoid")
+        if not humanoid or not backpack then
+            Library:Notify("Character not ready.", 3)
+            return
+        end
+
+        -- Xóa tool cũ nếu có
+        local existing = backpack:FindFirstChild("Jerk Off") or (character and character:FindFirstChild("Jerk Off"))
+        if existing then existing:Destroy() end
+
+        local tool = Instance.new("Tool")
+        tool.Name = "Jerk Off"
+        tool.ToolTip = "jorking it."
+        tool.RequiresHandle = false
+        tool.Parent = backpack
+
+        local jorkin = false
+        local jerkTrack = nil
+
+        local function stopJerk()
+            jorkin = false
+            if jerkTrack then
+                jerkTrack:Stop()
+                jerkTrack = nil
+            end
+        end
+
+        tool.Equipped:Connect(function() jorkin = true end)
+        tool.Unequipped:Connect(stopJerk)
+        humanoid.Died:Connect(stopJerk)
+
+        task.spawn(function()
+            while task.wait() do
+                if not tool.Parent then break end
+                if not jorkin then continue end
+
+                local char = LocalPlayer.Character
+                local hum = char and char:FindFirstChildWhichIsA("Humanoid")
+                if not hum then break end
+
+                local r15char = isR15(char)
+                if not jerkTrack then
+                    local anim = Instance.new("Animation")
+                    anim.AnimationId = r15char
+                        and "rbxassetid://698251653"
+                        or  "rbxassetid://72042024"
+                    jerkTrack = hum:LoadAnimation(anim)
+                end
+
+                jerkTrack:Play()
+                jerkTrack:AdjustSpeed(r15char and 0.7 or 0.65)
+                jerkTrack.TimePosition = 0.6
+                task.wait(0.1)
+                while jerkTrack and jerkTrack.TimePosition < (r15char and 0.7 or 0.65) do
+                    task.wait(0.1)
+                end
+                if jerkTrack then
+                    jerkTrack:Stop()
+                    jerkTrack = nil
+                end
+            end
+        end)
+
+        Library:Notify("Jerk Off tool added to backpack!", 3)
+    end
+end)
+
 
 ChatGroup:AddToggle("SpamChat", { Text = "Spam Chat", Default = false }):OnChanged(function()
     spamChatEnabled = Toggles.SpamChat.Value
@@ -2374,14 +2515,6 @@ RunService.Heartbeat:Connect(function()
             assemblyRoot.AssemblyAngularVelocity = Vector3.zero
         end
     end
-    
-    if Toggles.AntiJumpscare and Toggles.AntiJumpscare.Value then
-        pcall(function()
-            for _, sound in pairs(Workspace:GetDescendants()) do
-                if sound:IsA("Sound") and sound.Playing and (sound.Volume > 1.5 or sound.PlaybackSpeed > 1.5) then sound.Volume = 0 end
-            end
-        end)
-    end
 end)
 
 UserInputService.JumpRequest:Connect(function()
@@ -2599,30 +2732,19 @@ RunService.RenderStepped:Connect(function()
     end
 
 
+    -- Target selection (camera rotation tách riêng ở BindToRenderStep bên dưới)
     if aimbotEnabled then
         local shouldAim = true
-
         if aimbotHoldEnabled then
             shouldAim = UserInputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton2)
         end
-
         if shouldAim then
             local currentTargetPart = aimbotTarget and getAimbotTargetPart(aimbotTarget) or nil
-            local currentTargetValid = currentTargetPart and isValidTarget(aimbotTarget) and (not aimbotVisibleOnly or isAimbotTargetVisible(currentTargetPart))
-
+            local currentTargetValid = currentTargetPart
+                and isValidTarget(aimbotTarget)
+                and (not aimbotVisibleOnly or isAimbotTargetVisible(currentTargetPart))
             if not currentTargetValid or not aimbotLockTarget then
                 aimbotTarget = getBestAimbotTarget()
-                currentTargetPart = aimbotTarget and getAimbotTargetPart(aimbotTarget) or nil
-                currentTargetValid = currentTargetPart and isValidTarget(aimbotTarget) and (not aimbotVisibleOnly or isAimbotTargetVisible(currentTargetPart))
-            end
-
-            if currentTargetValid and currentTargetPart then
-                local origin = Camera.CFrame.Position
-                local destination = currentTargetPart.Position
-                local aimCFrame = CFrame.new(origin, destination)
-                Camera.CFrame = Camera.CFrame:Lerp(aimCFrame, math.clamp(aimbotSmoothness, 0.01, 1))
-            else
-                aimbotTarget = nil
             end
         else
             aimbotTarget = nil
@@ -2797,17 +2919,59 @@ end)
 
 applyLightingState()
 
+-- Aimbot camera override: chạy SAU camera module Roblox → fix góc nhìn thứ 3
+RunService:BindToRenderStep("AimbotCamOverride", Enum.RenderPriority.Camera.Value + 1, function()
+    if not aimbotEnabled or not Camera then return end
+    if not aimbotTarget then return end
+
+    local shouldAim = true
+    if aimbotHoldEnabled then
+        shouldAim = UserInputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton2)
+    end
+    if not shouldAim then return end
+
+    local targetPart = getAimbotTargetPart(aimbotTarget)
+    if not targetPart or not isValidTarget(aimbotTarget) then
+        aimbotTarget = nil
+        return
+    end
+    if aimbotVisibleOnly and not isAimbotTargetVisible(targetPart) then return end
+
+    local origin = Camera.CFrame.Position
+    local destination = targetPart.Position
+    local aimCFrame = CFrame.new(origin, destination)
+    Camera.CFrame = Camera.CFrame:Lerp(aimCFrame, math.clamp(aimbotSmoothness, 0.01, 1))
+end)
+
+-- No Recoil
+do
+    local noRecoilCF = nil
+    RunService.RenderStepped:Connect(function()
+        if not noRecoilEnabled then
+            noRecoilCF = nil
+            return
+        end
+        local cam = workspace.CurrentCamera
+        if noRecoilCF then
+            cam.CFrame = CFrame.new(cam.CFrame.Position) * (noRecoilCF - noRecoilCF.Position)
+        end
+        noRecoilCF = cam.CFrame
+    end)
+end
+
 -- Notify
-local rawMeta = getrawmetatable(game)
-if rawMeta and setreadonly and newcclosure and hookmetamethod then
-    local oldNamecall
-    oldNamecall = hookmetamethod(game, "__namecall", newcclosure(function(self, ...)
-        local args = { ... }
-        local method = getnamecallmethod()
+do
+    local rawMeta = getrawmetatable(game)
+    if rawMeta and setreadonly and newcclosure and hookmetamethod then
+        local oldNamecall
+        oldNamecall = hookmetamethod(game, "__namecall", newcclosure(function(self, ...)
+            local args = { ... }
+            local method = getnamecallmethod()
 
 
-        return oldNamecall(self, ...)
-    end))
+            return oldNamecall(self, ...)
+        end))
+    end
 end
 
 Library.ToggleKeybind = Enum.KeyCode.RightShift
