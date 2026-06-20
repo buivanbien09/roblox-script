@@ -1,5 +1,5 @@
 --[[
-    Universal Hub v3.0
+    28th6 Hub
     LinoriaLib GUI - Modern ESP Updated
 ]]
 
@@ -26,7 +26,7 @@ local LocalPlayer = Players.LocalPlayer
 local Camera = Workspace.CurrentCamera
 local cameraOffsetConnection = nil
 local AUTOLOAD_CONFIG_NAME = "autoload"
-local CONFIG_FOLDER = "UniversalHub/configs"
+local CONFIG_FOLDER = "28th6Hub/configs"
 local VirtualUser = game:GetService("VirtualUser")
 local TextChatService = game:FindService("TextChatService")
 
@@ -1084,7 +1084,7 @@ end
 
 -- Create Window
 local Window = Library:CreateWindow({
-    Title = "SayGex69",
+    Title = "28th6 Hub",
     Center = true,
     AutoShow = true,
     TabPadding = 8,
@@ -2366,7 +2366,7 @@ KeyGroup:AddLabel("Pull Players"):AddKeyPicker("PullKey", { Default = "P", SyncT
 
 ThemeManager:SetLibrary(Library)
 SaveManager:SetLibrary(Library)
-ThemeManager:SetFolder("UniversalHub")
+ThemeManager:SetFolder("28th6Hub")
 SaveManager:SetFolder(CONFIG_FOLDER)
 SaveManager:IgnoreThemeSettings()
 SaveManager:SetIgnoreIndexes({ "DeleteConfigName", "JoinJobIdInput", "SpamChatMessage" })
