@@ -15,8 +15,6 @@ Paste đoạn sau vào executor của bạn:
 loadstring(game:HttpGet("https://raw.githubusercontent.com/buivanbien09/roblox-script/refs/heads/main/28th6"))()
 ```
 
-> Thay `RAW_URL_CUA_BAN` bằng link raw tới file `28th6Hub.lua` trên GitHub/Pastebin của bạn.
-
 ---
 
 ## Tính năng
