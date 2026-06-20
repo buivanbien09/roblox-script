@@ -127,4 +127,4 @@ loadstring(game:HttpGet("https://raw.githubusercontent.com/buivanbien09/roblox-s
 
 ## Tác giả
 
-**Bien** — `28th6 Hub v3.0`
+**Bien** — `28th6 Hub`
