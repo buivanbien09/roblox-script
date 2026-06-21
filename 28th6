@@ -87,6 +87,10 @@ local State = {
     autoPickupRadius = 15,
 }
 
+-- Weak table: khi tool bi GC (key la weak), entry tu dong xoa khoi bang
+-- Tranh leak neu AncestryChanged khong fire dung cach
+setmetatable(State.patchedToolStates, { __mode = "k" })
+
 local defaultLightingState = {
     Ambient = Lighting.Ambient,
     OutdoorAmbient = Lighting.OutdoorAmbient,
@@ -1431,8 +1435,12 @@ end)
 Players.PlayerAdded:Connect(function()
     task.defer(refreshTeleportPlayerList)
 end)
-Players.PlayerRemoving:Connect(function()
+Players.PlayerRemoving:Connect(function(player)
     task.defer(refreshTeleportPlayerList)
+    -- Cleanup ESP ngay khi player roi de tranh Drawing objects bi leak
+    if player.Character then
+        RemoveESP(player.Character)
+    end
 end)
 
 task.defer(refreshTeleportPlayerList)
@@ -1637,12 +1645,6 @@ aimbotFovCircle.Filled = false
 aimbotFovCircle.Transparency = 1
 aimbotFovCircle.Visible = false
 
-local silentAimFovCircle = Drawing.new("Circle")
-silentAimFovCircle.Color = Color3.fromRGB(80, 170, 255)
-silentAimFovCircle.Thickness = 1
-silentAimFovCircle.Filled = false
-silentAimFovCircle.Transparency = 1
-silentAimFovCircle.Visible = false
 
 PullGroup:AddToggle("PullPlayers", { Text = "Pull Players/Bots (Client-side)", Default = false }):OnChanged(function() CombatState.pullEnabled = Toggles.PullPlayers.Value end)
 PullSettings:AddSlider("PullRadius", { Text = "Pull Radius", Default = 80, Min = 10, Max = 1000, Rounding = 0 }):OnChanged(function() CombatState.pullRadius = Options.PullRadius.Value end)
@@ -1849,8 +1851,11 @@ Players.PlayerAdded:Connect(function()
     task.defer(refreshBangPlayerList)
 end)
 
-Players.PlayerRemoving:Connect(function()
+Players.PlayerRemoving:Connect(function(player)
     task.defer(refreshBangPlayerList)
+    if player.Character then
+        RemoveESP(player.Character)
+    end
 end)
 
 task.defer(refreshBangPlayerList)
@@ -2199,6 +2204,24 @@ LocalPlayer.Idled:Connect(function()
         VirtualUser:CaptureController()
         VirtualUser:ClickButton2(Vector2.new())
     end
+end)
+
+LocalPlayer.CharacterRemoving:Connect(function()
+    -- Cleanup cac instance va connection gan voi character cu
+    if State.floatBodyVelocity then
+        pcall(function() State.floatBodyVelocity:Destroy() end)
+        State.floatBodyVelocity = nil
+    end
+    if State.clickTeleportConnection then
+        State.clickTeleportConnection:Disconnect()
+        State.clickTeleportConnection = nil
+    end
+    if State.freezePositionLockConnection then
+        State.freezePositionLockConnection:Disconnect()
+        State.freezePositionLockConnection = nil
+    end
+    State.freezePos = nil
+    State.characterCollisionStates = {}
 end)
 
 LocalPlayer.CharacterAdded:Connect(function(character)
@@ -2554,6 +2577,9 @@ end)
 -- NEW DRAWING ESP ENGINE (Supports fake players/bots too)
 -- ==========================================
 local ESP_Cache = {}
+
+-- Track connections de cleanup khi can (dung do...end tranh tang them locals)
+local Connections = {}
 
 local function createSkeletonLine()
     local line = Drawing.new("Line")
@@ -2996,3 +3022,38 @@ do
 end
 
 Library.ToggleKeybind = Enum.KeyCode.RightShift
+
+-- =====================================================================
+-- Memory cleanup khi script unload / game dong
+-- =====================================================================
+local function fullCleanup()
+    -- Disconnect tat ca tracked connections
+    for _, conn in ipairs(Connections) do
+        pcall(function() conn:Disconnect() end)
+    end
+    Connections = {}
+
+    -- Xoa tat ca ESP Drawing objects chua duoc cleanup
+    for char, _ in pairs(ESP_Cache) do
+        pcall(function() RemoveESP(char) end)
+    end
+
+    -- Cleanup State instances
+    if State.floatBodyVelocity then
+        pcall(function() State.floatBodyVelocity:Destroy() end)
+        State.floatBodyVelocity = nil
+    end
+
+    -- Cleanup Drawing objects cho aimbot FOV circle
+    pcall(function()
+        aimbotFovCircle.Visible = false
+        aimbotFovCircle:Remove()
+    end)
+end
+
+-- Chay cleanup khi player bi kick / teleport
+LocalPlayer.AncestryChanged:Connect(function(_, parent)
+    if not parent then
+        fullCleanup()
+    end
+end)
