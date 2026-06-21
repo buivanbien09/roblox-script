@@ -7,9 +7,24 @@
 
 -- Load LinoriaLib
 local repo = "https://raw.githubusercontent.com/violin-suzutsuki/LinoriaLib/main/"
-local Library = loadstring(game:HttpGet(repo .. "Library.lua"))()
-local ThemeManager = loadstring(game:HttpGet(repo .. "addons/ThemeManager.lua"))()
-local SaveManager = loadstring(game:HttpGet(repo .. "addons/SaveManager.lua"))()
+
+local function safeLoad(url)
+    local ok, result = pcall(function()
+        return game:HttpGet(url)
+    end)
+    if not ok or type(result) ~= "string" or result:sub(1, 1) == "<" then
+        error("[28th6 Hub] Khong the tai: " .. url .. "\nKiem tra mang hoac thu lai sau.", 2)
+    end
+    local fn, err = loadstring(result)
+    if not fn then
+        error("[28th6 Hub] Loi compile tu: " .. url .. "\n" .. tostring(err), 2)
+    end
+    return fn()
+end
+
+local Library     = safeLoad(repo .. "Library.lua")
+local ThemeManager = safeLoad(repo .. "addons/ThemeManager.lua")
+local SaveManager  = safeLoad(repo .. "addons/SaveManager.lua")
 
 -- Services
 local Players = game:GetService("Players")
@@ -30,36 +45,48 @@ local CONFIG_FOLDER = "28th6Hub/configs"
 local VirtualUser = game:GetService("VirtualUser")
 local TextChatService = game:FindService("TextChatService")
 
--- Variables
-local flyEnabled = false
-local noclipEnabled = false
-local infJumpEnabled = false
-local speedEnabled = false
-local clickTPEnabled = false
-local autoClimbEnabled = false
-local antiWindEnabled = false
-local fullbrightEnabled = false
-local noFogEnabled = false
-local forceTimeEnabled = false
-local instantInteractEnabled = false
-local instantReloadEnabled = false
-local rapidFireEnabled = false
-local freezeEnabled = false
-local walkSpeed = 16
-local flySpeed = 50
-local autoClimbSpeed = 10
-local forceTimeValue = 12
-local freezePos = nil
-local clickTeleportConnection = nil
-local promptHoldDurations = {}
-local floatBodyVelocity = nil
-local freezePositionLockConnection = nil
-local suppressCharacterBugUntil = 0
-local spamChatEnabled = false
-local spamChatMessage = ""
-local spamChatDelay = 3
-local lastSpamChatTime = 0
-local textChatService = TextChatService
+-- Variables (nhom vao State table de giam so luong local, tranh loi >200)
+local State = {
+    flyEnabled = false,
+    noclipEnabled = false,
+    infJumpEnabled = false,
+    speedEnabled = false,
+    clickTPEnabled = false,
+    autoClimbEnabled = false,
+    antiWindEnabled = false,
+    fullbrightEnabled = false,
+    noFogEnabled = false,
+    forceTimeEnabled = false,
+    instantInteractEnabled = false,
+    instantReloadEnabled = false,
+    rapidFireEnabled = false,
+    freezeEnabled = false,
+    walkSpeed = 16,
+    flySpeed = 50,
+    autoClimbSpeed = 10,
+    forceTimeValue = 12,
+    freezePos = nil,
+    clickTeleportConnection = nil,
+    promptHoldDurations = {},
+    floatBodyVelocity = nil,
+    freezePositionLockConnection = nil,
+    suppressCharacterBugUntil = 0,
+    spamChatEnabled = false,
+    spamChatMessage = "",
+    spamChatDelay = 3,
+    lastSpamChatTime = 0,
+    textChatService = game:FindService("TextChatService"),
+    detectedTeamCheckMode = nil,
+    lastDetectedTeamCheckMode = nil,
+    noSpreadEnabled = false,
+    noRecoilEnabled = false,
+    patchedToolStates = {},
+    characterCollisionStates = {},
+    savedTeleportPoints = {},
+    autoPickupEnabled = false,
+    autoPickupRadius = 15,
+}
+
 local defaultLightingState = {
     Ambient = Lighting.Ambient,
     OutdoorAmbient = Lighting.OutdoorAmbient,
@@ -75,16 +102,6 @@ local defaultLightingState = {
     DepthOfFieldEnabled = {},
     SunRaysEnabled = {},
 }
-local detectedTeamCheckMode = nil
-local lastDetectedTeamCheckMode = nil
-local noSpreadEnabled = false
-local noRecoilEnabled = false
-local patchedToolStates = {}
-local characterCollisionStates = {}
-local savedTeleportPoints = {}
-local autoPickupEnabled = false
-local autoPickupRadius = 15
-
 local atmosphere = Lighting:FindFirstChildOfClass("Atmosphere")
 if atmosphere then
     defaultLightingState.AtmosphereDensity = atmosphere.Density
@@ -165,11 +182,11 @@ local function rememberCharacterCollisionState(character)
         return
     end
 
-    characterCollisionStates = {}
+    State.characterCollisionStates = {}
 
     for _, part in ipairs(character:GetDescendants()) do
         if part:IsA("BasePart") then
-            characterCollisionStates[part] = {
+            State.characterCollisionStates[part] = {
                 CanCollide = part.CanCollide,
                 Massless = part.Massless
             }
@@ -178,7 +195,7 @@ local function rememberCharacterCollisionState(character)
 end
 
 local function applyCharacterFootState(character)
-    if not noclipEnabled then
+    if not State.noclipEnabled then
         return
     end
 
@@ -195,7 +212,7 @@ local function restoreCharacterCollisionState(character)
 
     for _, part in ipairs(character:GetDescendants()) do
         if part:IsA("BasePart") then
-            local originalState = characterCollisionStates[part]
+            local originalState = State.characterCollisionStates[part]
             if originalState then
                 part.CanCollide = originalState.CanCollide
                 part.Massless = originalState.Massless
@@ -203,15 +220,15 @@ local function restoreCharacterCollisionState(character)
         end
     end
 
-    characterCollisionStates = {}
+    State.characterCollisionStates = {}
 end
 
 local function shouldSuppressCharacterMotion()
-    return tick() < suppressCharacterBugUntil
+    return tick() < State.suppressCharacterBugUntil
 end
 
 local function markCharacterSpawnProtection(duration)
-    suppressCharacterBugUntil = tick() + (duration or 1.5)
+    State.suppressCharacterBugUntil = tick() + (duration or 1.5)
 end
 
 local function stopRootMotion(root)
@@ -227,17 +244,17 @@ local function stopRootMotion(root)
 end
 
 local function stopFreezePositionLock()
-    if freezePositionLockConnection then
-        freezePositionLockConnection:Disconnect()
-        freezePositionLockConnection = nil
+    if State.freezePositionLockConnection then
+        State.freezePositionLockConnection:Disconnect()
+        State.freezePositionLockConnection = nil
     end
 end
 
 local function startFreezePositionLock()
     stopFreezePositionLock()
 
-    freezePositionLockConnection = RunService.Stepped:Connect(function()
-        if not freezeEnabled or not freezePos then
+    State.freezePositionLockConnection = RunService.Stepped:Connect(function()
+        if not State.freezeEnabled or not State.freezePos then
             return
         end
 
@@ -250,7 +267,7 @@ local function startFreezePositionLock()
         end
 
         if assemblyRoot then
-            assemblyRoot.CFrame = freezePos
+            assemblyRoot.CFrame = State.freezePos
             stopRootMotion(assemblyRoot)
         end
     end)
@@ -262,15 +279,15 @@ local function setPromptInstant(prompt, enabled)
     end
 
     if enabled then
-        if promptHoldDurations[prompt] == nil then
-            promptHoldDurations[prompt] = prompt.HoldDuration
+        if State.promptHoldDurations[prompt] == nil then
+            State.promptHoldDurations[prompt] = prompt.HoldDuration
         end
         prompt.HoldDuration = 0
     else
-        local originalDuration = promptHoldDurations[prompt]
+        local originalDuration = State.promptHoldDurations[prompt]
         if originalDuration ~= nil then
             prompt.HoldDuration = originalDuration
-            promptHoldDurations[prompt] = nil
+            State.promptHoldDurations[prompt] = nil
         end
     end
 end
@@ -278,7 +295,7 @@ end
 local function refreshInstantInteractPrompts()
     for _, obj in ipairs(Workspace:GetDescendants()) do
         if obj:IsA("ProximityPrompt") then
-            setPromptInstant(obj, instantInteractEnabled)
+            setPromptInstant(obj, State.instantInteractEnabled)
         end
     end
 end
@@ -375,7 +392,7 @@ local function autoPickupNearbyItems()
     for _, obj in ipairs(Workspace:GetDescendants()) do
         if obj:IsA("ProximityPrompt") and obj.Enabled then
             local promptPosition = getPromptWorldPosition(obj)
-            if promptPosition and (root.Position - promptPosition).Magnitude <= autoPickupRadius then
+            if promptPosition and (root.Position - promptPosition).Magnitude <= State.autoPickupRadius then
                 -- task.spawn de tranh yield trong Heartbeat callback
                 task.spawn(smartTriggerPrompt, obj)
             end
@@ -383,12 +400,47 @@ local function autoPickupNearbyItems()
     end
 end
 
+
+-- Dinh nghia truoc getPatchedToolState de tranh forward reference
+local function restorePatchedTool(tool)
+    local state = State.patchedToolStates[tool]
+    if not state then
+        return
+    end
+
+    for object, properties in pairs(state.values) do
+        if object and object.Parent then
+            for key, originalValue in pairs(properties) do
+                pcall(function()
+                    object[key] = originalValue
+                end)
+            end
+        end
+    end
+
+    for moduleObject, properties in pairs(state.modules) do
+        if moduleObject and moduleObject.Parent then
+            pcall(function()
+                local moduleValue = require(moduleObject)
+                if type(moduleValue) == "table" then
+                    for key, originalValue in pairs(properties) do
+                        moduleValue[key] = originalValue
+                    end
+                end
+            end)
+        end
+    end
+
+    state.active.NoSpread = false
+    state.active.InstantReload = false
+    state.active.RapidFire = false
+end
 local function getPatchedToolState(tool)
     if not tool then
         return nil
     end
 
-    local state = patchedToolStates[tool]
+    local state = State.patchedToolStates[tool]
     if state then
         return state
     end
@@ -403,14 +455,14 @@ local function getPatchedToolState(tool)
             RapidFire = false
         }
     }
-    patchedToolStates[tool] = state
+    State.patchedToolStates[tool] = state
 
     state.connections.ancestryChanged = tool.AncestryChanged:Connect(function(_, parent)
         if parent ~= nil then
             return
         end
 
-        local currentState = patchedToolStates[tool]
+        local currentState = State.patchedToolStates[tool]
         if currentState then
             restorePatchedTool(tool)
 
@@ -420,7 +472,7 @@ local function getPatchedToolState(tool)
                 end
             end
 
-            patchedToolStates[tool] = nil
+            State.patchedToolStates[tool] = nil
         end
     end)
 
@@ -519,39 +571,6 @@ local function patchModuleNumericKeys(state, moduleObject, keyMatchers)
     end)
 end
 
-local function restorePatchedTool(tool)
-    local state = patchedToolStates[tool]
-    if not state then
-        return
-    end
-
-    for object, properties in pairs(state.values) do
-        if object and object.Parent then
-            for key, originalValue in pairs(properties) do
-                pcall(function()
-                    object[key] = originalValue
-                end)
-            end
-        end
-    end
-
-    for moduleObject, properties in pairs(state.modules) do
-        if moduleObject and moduleObject.Parent then
-            pcall(function()
-                local moduleValue = require(moduleObject)
-                if type(moduleValue) == "table" then
-                    for key, originalValue in pairs(properties) do
-                        moduleValue[key] = originalValue
-                    end
-                end
-            end)
-        end
-    end
-
-    state.active.NoSpread = false
-    state.active.InstantReload = false
-    state.active.RapidFire = false
-end
 
 local function patchToolForInstantReload(tool)
     if not tool or not tool:IsA("Tool") then
@@ -640,7 +659,7 @@ end
 local function getSavedTeleportPointNames()
     local pointNames = {}
 
-    for pointName in pairs(savedTeleportPoints) do
+    for pointName in pairs(State.savedTeleportPoints) do
         table.insert(pointNames, pointName)
     end
 
@@ -742,8 +761,8 @@ local function sendChatMessage(message)
         return false
     end
 
-    if textChatService and textChatService.ChatVersion == Enum.ChatVersion.TextChatService then
-        local textChannels = textChatService:FindFirstChild("TextChannels")
+    if State.textChatService and State.textChatService.ChatVersion == Enum.ChatVersion.TextChatService then
+        local textChannels = State.textChatService:FindFirstChild("TextChannels")
         local generalChannel = textChannels and textChannels:FindFirstChild("RBXGeneral")
         if generalChannel and generalChannel.SendAsync then
             return pcall(function()
@@ -845,17 +864,17 @@ local function isSameTeam(player)
 
     local mode = Options.TeamCheckMode and Options.TeamCheckMode.Value or "Auto Detect"
     if mode == "Auto Detect" then
-        detectedTeamCheckMode = getAvailableTeamCheckMode()
-        if detectedTeamCheckMode ~= lastDetectedTeamCheckMode then
-            lastDetectedTeamCheckMode = detectedTeamCheckMode
-            if detectedTeamCheckMode then
-                notify("Auto detected team check: " .. detectedTeamCheckMode, 3)
+        State.detectedTeamCheckMode = getAvailableTeamCheckMode()
+        if State.detectedTeamCheckMode ~= State.lastDetectedTeamCheckMode then
+            State.lastDetectedTeamCheckMode = State.detectedTeamCheckMode
+            if State.detectedTeamCheckMode then
+                notify("Auto detected team check: " .. State.detectedTeamCheckMode, 3)
             end
         end
-        mode = detectedTeamCheckMode or "Auto (Try All)"
+        mode = State.detectedTeamCheckMode or "Auto (Try All)"
     else
-        detectedTeamCheckMode = nil
-        lastDetectedTeamCheckMode = nil
+        State.detectedTeamCheckMode = nil
+        State.lastDetectedTeamCheckMode = nil
     end
 
     local function checkRobloxTeam()
@@ -950,20 +969,20 @@ local function stopFly()
 end
 
 local function resetCharacterMotionControllers()
-    speedEnabled = false
-    flyEnabled = false
-    noclipEnabled = false
-    infJumpEnabled = false
-    clickTPEnabled = false
-    autoClimbEnabled = false
-    antiWindEnabled = false
+    State.speedEnabled = false
+    State.flyEnabled = false
+    State.noclipEnabled = false
+    State.infJumpEnabled = false
+    State.clickTPEnabled = false
+    State.autoClimbEnabled = false
+    State.antiWindEnabled = false
 
     stopFly()
     stopFreezePositionLock()
 
-    if clickTeleportConnection then
-        clickTeleportConnection:Disconnect()
-        clickTeleportConnection = nil
+    if State.clickTeleportConnection then
+        State.clickTeleportConnection:Disconnect()
+        State.clickTeleportConnection = nil
     end
 
     if Toggles then
@@ -979,12 +998,12 @@ local function resetCharacterMotionControllers()
         if Toggles.FreezeToggle then Toggles.FreezeToggle:SetValue(false) end
     end
 
-    freezeEnabled = false
-    freezePos = nil
+    State.freezeEnabled = false
+    State.freezePos = nil
 
-    if floatBodyVelocity then
-        floatBodyVelocity:Destroy()
-        floatBodyVelocity = nil
+    if State.floatBodyVelocity then
+        State.floatBodyVelocity:Destroy()
+        State.floatBodyVelocity = nil
     end
 
     local character = LocalPlayer.Character
@@ -1020,7 +1039,7 @@ local function resetCharacterMotionControllers()
 end
 
 local function applyLightingState()
-    if fullbrightEnabled then
+    if State.fullbrightEnabled then
         Lighting.Ambient = Color3.new(1, 1, 1)
         Lighting.OutdoorAmbient = Color3.new(1, 1, 1)
         Lighting.Brightness = 2
@@ -1032,7 +1051,7 @@ local function applyLightingState()
         Lighting.GlobalShadows = defaultLightingState.GlobalShadows
     end
 
-    if noFogEnabled or fullbrightEnabled then
+    if State.noFogEnabled or State.fullbrightEnabled then
         Lighting.FogEnd = 1000000
 
         local currentAtmosphere = Lighting:FindFirstChildOfClass("Atmosphere")
@@ -1076,8 +1095,8 @@ local function applyLightingState()
         end
     end
 
-    if forceTimeEnabled then
-        Lighting.ClockTime = forceTimeValue
+    if State.forceTimeEnabled then
+        Lighting.ClockTime = State.forceTimeValue
     end
 end
 
@@ -1098,19 +1117,19 @@ local TeleportGroup = PlayerTab:AddRightGroupbox("Teleport")
 local SavedPointGroup = PlayerTab:AddRightGroupbox("Points")
 local FlyGroup = PlayerTab:AddRightGroupbox("Fly")
 
-MovementGroup:AddToggle("SpeedToggle", { Text = "Speed Boost", Default = false }):OnChanged(function() speedEnabled = Toggles.SpeedToggle.Value end)
-MovementGroup:AddSlider("WalkSpeedSlider", { Text = "Boost Power", Default = 50, Min = 16, Max = 500, Rounding = 0 }):OnChanged(function() walkSpeed = Options.WalkSpeedSlider.Value end)
+MovementGroup:AddToggle("SpeedToggle", { Text = "Speed Boost", Default = false }):OnChanged(function() State.speedEnabled = Toggles.SpeedToggle.Value end)
+MovementGroup:AddSlider("WalkSpeedSlider", { Text = "Boost Power", Default = 50, Min = 16, Max = 500, Rounding = 0 }):OnChanged(function() State.walkSpeed = Options.WalkSpeedSlider.Value end)
 MovementGroup:AddDropdown("SpeedMethod", { Text = "Speed Method", Values = {"WalkSpeed", "CFrame", "Velocity"}, Default = 1 })
-MovementGroup:AddToggle("InfJump", { Text = "Infinite Jump", Default = false }):OnChanged(function() infJumpEnabled = Toggles.InfJump.Value end)
+MovementGroup:AddToggle("InfJump", { Text = "Infinite Jump", Default = false }):OnChanged(function() State.infJumpEnabled = Toggles.InfJump.Value end)
 MovementGroup:AddToggle("NoclipToggle", { Text = "Noclip", Default = false }):OnChanged(function()
-    noclipEnabled = Toggles.NoclipToggle.Value
+    State.noclipEnabled = Toggles.NoclipToggle.Value
 
     local character = LocalPlayer.Character
     if not character then
         return
     end
 
-    if noclipEnabled then
+    if State.noclipEnabled then
         rememberCharacterCollisionState(character)
 
         for _, part in pairs(character:GetDescendants()) do
@@ -1137,16 +1156,16 @@ MovementGroup:AddToggle("NoclipToggle", { Text = "Noclip", Default = false }):On
     end
 end)
 MovementGroup:AddToggle("ClickTP", { Text = "Teleport To Mouse (T)", Default = false }):OnChanged(function()
-    clickTPEnabled = Toggles.ClickTP.Value
+    State.clickTPEnabled = Toggles.ClickTP.Value
 
-    if clickTeleportConnection then
-        clickTeleportConnection:Disconnect()
-        clickTeleportConnection = nil
+    if State.clickTeleportConnection then
+        State.clickTeleportConnection:Disconnect()
+        State.clickTeleportConnection = nil
     end
 
-    if clickTPEnabled then
-        clickTeleportConnection = UserInputService.InputBegan:Connect(function(input, gameProcessed)
-            if gameProcessed or not clickTPEnabled then
+    if State.clickTPEnabled then
+        State.clickTeleportConnection = UserInputService.InputBegan:Connect(function(input, gameProcessed)
+            if gameProcessed or not State.clickTPEnabled then
                 return
             end
 
@@ -1173,32 +1192,32 @@ MovementGroup:AddToggle("ClickTP", { Text = "Teleport To Mouse (T)", Default = f
     end
 end)
 MovementGroup:AddToggle("FreezeToggle", { Text = "Freeze Position", Default = false }):OnChanged(function()
-    freezeEnabled = Toggles.FreezeToggle.Value
+    State.freezeEnabled = Toggles.FreezeToggle.Value
 
-    if freezeEnabled then
+    if State.freezeEnabled then
         local root = getRootPart()
         if root then
             local assemblyRoot = getRootAssembly(root)
-            freezePos = assemblyRoot and assemblyRoot.CFrame or root.CFrame
+            State.freezePos = assemblyRoot and assemblyRoot.CFrame or root.CFrame
             startFreezePositionLock()
         else
-            freezePos = nil
+            State.freezePos = nil
             stopFreezePositionLock()
         end
     else
-        freezePos = nil
+        State.freezePos = nil
         stopFreezePositionLock()
     end
 end)
 MovementGroup:AddToggle("InstantInteract", { Text = "Instant Interaction", Default = false }):OnChanged(function()
-    instantInteractEnabled = Toggles.InstantInteract.Value
+    State.instantInteractEnabled = Toggles.InstantInteract.Value
     refreshInstantInteractPrompts()
 end)
 MovementGroup:AddToggle("AutoPickup", { Text = "Auto Pick Up Items", Default = false }):OnChanged(function()
-    autoPickupEnabled = Toggles.AutoPickup.Value
+    State.autoPickupEnabled = Toggles.AutoPickup.Value
 end)
 MovementGroup:AddSlider("AutoPickupRadius", { Text = "Pick Up Radius", Default = 15, Min = 5, Max = 50, Rounding = 0 }):OnChanged(function()
-    autoPickupRadius = Options.AutoPickupRadius.Value
+    State.autoPickupRadius = Options.AutoPickupRadius.Value
 end)
 
 local selectedTeleportPlayer = nil
@@ -1259,12 +1278,12 @@ local function saveCurrentTeleportPoint()
     local pointName = "Point " .. tostring(#getSavedTeleportPointNames() + 1)
     local nextIndex = 1
 
-    while savedTeleportPoints[pointName] do
+    while State.savedTeleportPoints[pointName] do
         nextIndex = nextIndex + 1
         pointName = "Point " .. tostring(nextIndex)
     end
 
-    savedTeleportPoints[pointName] = root.CFrame
+    State.savedTeleportPoints[pointName] = root.CFrame
     selectedSavedTeleportPoint = pointName
     refreshSavedPointDropdown()
     notify("Saved point: " .. pointName, 3)
@@ -1272,7 +1291,7 @@ end
 
 local function teleportToSavedPoint()
     local root = getRootPart()
-    local targetCFrame = selectedSavedTeleportPoint and savedTeleportPoints[selectedSavedTeleportPoint] or nil
+    local targetCFrame = selectedSavedTeleportPoint and State.savedTeleportPoints[selectedSavedTeleportPoint] or nil
 
     if not root then
         notify("Your character root part was not found.", 3)
@@ -1289,12 +1308,12 @@ local function teleportToSavedPoint()
 end
 
 local function deleteSavedPoint()
-    if not selectedSavedTeleportPoint or not savedTeleportPoints[selectedSavedTeleportPoint] then
+    if not selectedSavedTeleportPoint or not State.savedTeleportPoints[selectedSavedTeleportPoint] then
         notify("Please select a saved point.", 3)
         return
     end
 
-    savedTeleportPoints[selectedSavedTeleportPoint] = nil
+    State.savedTeleportPoints[selectedSavedTeleportPoint] = nil
     selectedSavedTeleportPoint = nil
     refreshSavedPointDropdown()
     notify("Saved point deleted.", 3)
@@ -1424,20 +1443,20 @@ refreshSavedPointDropdown()
 
 -- Fly
 FlyGroup:AddToggle("FlyToggle", { Text = "Fly", Default = false }):OnChanged(function()
-    flyEnabled = Toggles.FlyToggle.Value
-    if flyEnabled then startFly() else stopFly() end
+    State.flyEnabled = Toggles.FlyToggle.Value
+    if State.flyEnabled then startFly() else stopFly() end
 end)
-FlyGroup:AddSlider("FlySpeedSlider", { Text = "Fly Speed", Default = 50, Min = 10, Max = 200, Rounding = 0 }):OnChanged(function() flySpeed = Options.FlySpeedSlider.Value end)
+FlyGroup:AddSlider("FlySpeedSlider", { Text = "Fly Speed", Default = 50, Min = 10, Max = 200, Rounding = 0 }):OnChanged(function() State.flySpeed = Options.FlySpeedSlider.Value end)
 FlyGroup:AddToggle("AutoClimbToggle", { Text = "Auto Climb", Default = false }):OnChanged(function()
-    autoClimbEnabled = Toggles.AutoClimbToggle.Value
+    State.autoClimbEnabled = Toggles.AutoClimbToggle.Value
     local root = getRootPart()
     if root then
-        if autoClimbEnabled then
+        if State.autoClimbEnabled then
             if not root:FindFirstChild("AutoClimbForce") then
                 local bf = Instance.new("BodyVelocity")
                 bf.Name = "AutoClimbForce"
                 bf.MaxForce = Vector3.new(0, math.huge, 0)
-                bf.Velocity = Vector3.new(0, autoClimbSpeed, 0)
+                bf.Velocity = Vector3.new(0, State.autoClimbSpeed, 0)
                 bf.Parent = root
             end
         else
@@ -1446,22 +1465,22 @@ FlyGroup:AddToggle("AutoClimbToggle", { Text = "Auto Climb", Default = false }):
         end
     end
 end)
-FlyGroup:AddSlider("ClimbSpeedSlider", { Text = "Climb Speed", Default = 10, Min = 1, Max = 100, Rounding = 0 }):OnChanged(function() autoClimbSpeed = Options.ClimbSpeedSlider.Value end)
-FlyGroup:AddToggle("AntiWindToggle", { Text = "Anti-Wind", Default = false }):OnChanged(function() antiWindEnabled = Toggles.AntiWindToggle.Value end)
+FlyGroup:AddSlider("ClimbSpeedSlider", { Text = "Climb Speed", Default = 10, Min = 1, Max = 100, Rounding = 0 }):OnChanged(function() State.autoClimbSpeed = Options.ClimbSpeedSlider.Value end)
+FlyGroup:AddToggle("AntiWindToggle", { Text = "Anti-Wind", Default = false }):OnChanged(function() State.antiWindEnabled = Toggles.AntiWindToggle.Value end)
 FlyGroup:AddToggle("FloatToggle", { Text = "Float", Default = false }):OnChanged(function()
     local root = getRootPart()
 
-    if floatBodyVelocity then
-        floatBodyVelocity:Destroy()
-        floatBodyVelocity = nil
+    if State.floatBodyVelocity then
+        State.floatBodyVelocity:Destroy()
+        State.floatBodyVelocity = nil
     end
 
     if Toggles.FloatToggle.Value and root then
-        floatBodyVelocity = Instance.new("BodyVelocity")
-        floatBodyVelocity.Name = "FloatForce"
-        floatBodyVelocity.MaxForce = Vector3.new(0, math.huge, 0)
-        floatBodyVelocity.Velocity = Vector3.new(0, 0, 0)
-        floatBodyVelocity.Parent = root
+        State.floatBodyVelocity = Instance.new("BodyVelocity")
+        State.floatBodyVelocity.Name = "FloatForce"
+        State.floatBodyVelocity.MaxForce = Vector3.new(0, math.huge, 0)
+        State.floatBodyVelocity.Velocity = Vector3.new(0, 0, 0)
+        State.floatBodyVelocity.Parent = root
     end
 end)
 FlyGroup:AddToggle("SpinPlayer", { Text = "Spin Player", Default = false })
@@ -1475,29 +1494,29 @@ RunService.Heartbeat:Connect(function()
                 return
             end
 
-            if not floatBodyVelocity or floatBodyVelocity.Parent ~= root then
-                if floatBodyVelocity then
-                    floatBodyVelocity:Destroy()
+            if not State.floatBodyVelocity or State.floatBodyVelocity.Parent ~= root then
+                if State.floatBodyVelocity then
+                    State.floatBodyVelocity:Destroy()
                 end
 
-                floatBodyVelocity = Instance.new("BodyVelocity")
-                floatBodyVelocity.Name = "FloatForce"
-                floatBodyVelocity.MaxForce = Vector3.new(0, math.huge, 0)
-                floatBodyVelocity.Parent = root
+                State.floatBodyVelocity = Instance.new("BodyVelocity")
+                State.floatBodyVelocity.Name = "FloatForce"
+                State.floatBodyVelocity.MaxForce = Vector3.new(0, math.huge, 0)
+                State.floatBodyVelocity.Parent = root
             end
 
-            floatBodyVelocity.Velocity = Vector3.new(0, 0, 0)
+            State.floatBodyVelocity.Velocity = Vector3.new(0, 0, 0)
             root.AssemblyLinearVelocity = Vector3.new(root.AssemblyLinearVelocity.X, 0, root.AssemblyLinearVelocity.Z)
         end)
-    elseif floatBodyVelocity then
-        floatBodyVelocity:Destroy()
-        floatBodyVelocity = nil
+    elseif State.floatBodyVelocity then
+        State.floatBodyVelocity:Destroy()
+        State.floatBodyVelocity = nil
     end
 end)
 
 Workspace.DescendantRemoving:Connect(function(descendant)
-    if descendant == floatBodyVelocity then
-        floatBodyVelocity = nil
+    if descendant == State.floatBodyVelocity then
+        State.floatBodyVelocity = nil
     end
 end)
 
@@ -1546,29 +1565,29 @@ ESPGroup:AddDropdown("TeamCheckMode", {
 
 -- Lighting
 LightingGroup:AddToggle("Fullbright", { Text = "Fullbright", Default = false }):OnChanged(function()
-    fullbrightEnabled = Toggles.Fullbright.Value
+    State.fullbrightEnabled = Toggles.Fullbright.Value
     applyLightingState()
 end)
 
 LightingGroup:AddToggle("NoFog", { Text = "No Fog", Default = false }):OnChanged(function()
-    noFogEnabled = Toggles.NoFog.Value
+    State.noFogEnabled = Toggles.NoFog.Value
     applyLightingState()
 end)
 
 
 local originalClockTime = Lighting.ClockTime
 LightingGroup:AddToggle("ForceTime", { Text = "Force Time", Default = false }):OnChanged(function()
-    forceTimeEnabled = Toggles.ForceTime.Value
-    if forceTimeEnabled then
-        Lighting.ClockTime = forceTimeValue
+    State.forceTimeEnabled = Toggles.ForceTime.Value
+    if State.forceTimeEnabled then
+        Lighting.ClockTime = State.forceTimeValue
     else
         Lighting.ClockTime = originalClockTime
     end
 end)
 LightingGroup:AddSlider("TimeSlider", { Text = "Time of Day", Default = 12, Min = 0, Max = 24, Rounding = 1 }):OnChanged(function()
-    forceTimeValue = Options.TimeSlider.Value
-    if forceTimeEnabled then
-        Lighting.ClockTime = forceTimeValue
+    State.forceTimeValue = Options.TimeSlider.Value
+    if State.forceTimeEnabled then
+        Lighting.ClockTime = State.forceTimeValue
     end
 end)
 LightingGroup:AddSlider("FOVSlider", { Text = "FOV", Default = 70, Min = 30, Max = 120, Rounding = 0 }):OnChanged(function()
@@ -1581,34 +1600,36 @@ local PullGroup = CombatTab:AddLeftGroupbox("Client Pull")
 local PullSettings = CombatTab:AddRightGroupbox("Settings")
 local WeaponGroup = CombatTab:AddRightGroupbox("Weapon")
 
-local pullEnabled = false
-local pullRadius = 80
-local pullDistance = 5
-local pullOffsetX = 0
-local pullOffsetY = 1.5
-local pullOffsetXStep = 0.1
-local pullOffsetYStep = 0.1
-local pullLiftOffset = 1.5
-local pullMaxTargets = 1
-local pullPausedByChat = false
-local pullControlUsername = "hieu_e88"
+local CombatState = {
+    pullEnabled = false,
+    pullRadius = 80,
+    pullDistance = 5,
+    pullOffsetX = 0,
+    pullOffsetY = 1.5,
+    pullOffsetXStep = 0.1,
+    pullOffsetYStep = 0.1,
+    pullLiftOffset = 1.5,
+    pullMaxTargets = 1,
+    pullPausedByChat = false,
+    pullControlUsername = "hieu_e88",
+    bangSpeed = 3,
+    bangEnabled = false,
+    aimbotEnabled = false,
+    aimbotHoldEnabled = false,
+    aimbotAimPart = "Head",
+    aimbotFov = 180,
+    aimbotSmoothness = 0.18,
+    aimbotTarget = nil,
+    aimbotVisibleOnly = true,
+    aimbotLockTarget = false,
+    aimbotShowFov = true,
+    aimbotShowTargetInfo = true,
+    aimbotShowTargetDistance = true,
+}
 local bangTargetPlayer = nil
 local bangTargetNames = {}
 local bangDropdown
-local bangSpeed = 3
-local bangEnabled = false
 local bangState = { anim = nil, track = nil, died = nil, loop = nil }
-local aimbotEnabled = false
-local aimbotHoldEnabled = false
-local aimbotAimPart = "Head"
-local aimbotFov = 180
-local aimbotSmoothness = 0.18
-local aimbotTarget = nil
-local aimbotVisibleOnly = true
-local aimbotLockTarget = false
-local aimbotShowFov = true
-local aimbotShowTargetInfo = true
-local aimbotShowTargetDistance = true
 local aimbotFovCircle = Drawing.new("Circle")
 aimbotFovCircle.Color = Color3.fromRGB(255, 255, 255)
 aimbotFovCircle.Thickness = 1
@@ -1623,25 +1644,25 @@ silentAimFovCircle.Filled = false
 silentAimFovCircle.Transparency = 1
 silentAimFovCircle.Visible = false
 
-PullGroup:AddToggle("PullPlayers", { Text = "Pull Players/Bots (Client-side)", Default = false }):OnChanged(function() pullEnabled = Toggles.PullPlayers.Value end)
-PullSettings:AddSlider("PullRadius", { Text = "Pull Radius", Default = 80, Min = 10, Max = 1000, Rounding = 0 }):OnChanged(function() pullRadius = Options.PullRadius.Value end)
-PullSettings:AddSlider("PullDistance", { Text = "Pull Distance", Default = 5, Min = 2, Max = 15, Rounding = 0 }):OnChanged(function() pullDistance = Options.PullDistance.Value end)
-PullSettings:AddSlider("PullOffsetX", { Text = "Pull X Offset", Default = 0, Min = -15, Max = 15, Rounding = 1 }):OnChanged(function() pullOffsetX = Options.PullOffsetX.Value end)
-PullSettings:AddSlider("PullOffsetY", { Text = "Pull Y Offset", Default = 1.5, Min = -15, Max = 15, Rounding = 1 }):OnChanged(function() pullOffsetY = Options.PullOffsetY.Value end)
+PullGroup:AddToggle("PullPlayers", { Text = "Pull Players/Bots (Client-side)", Default = false }):OnChanged(function() CombatState.pullEnabled = Toggles.PullPlayers.Value end)
+PullSettings:AddSlider("PullRadius", { Text = "Pull Radius", Default = 80, Min = 10, Max = 1000, Rounding = 0 }):OnChanged(function() CombatState.pullRadius = Options.PullRadius.Value end)
+PullSettings:AddSlider("PullDistance", { Text = "Pull Distance", Default = 5, Min = 2, Max = 15, Rounding = 0 }):OnChanged(function() CombatState.pullDistance = Options.PullDistance.Value end)
+PullSettings:AddSlider("PullOffsetX", { Text = "Pull X Offset", Default = 0, Min = -15, Max = 15, Rounding = 1 }):OnChanged(function() CombatState.pullOffsetX = Options.PullOffsetX.Value end)
+PullSettings:AddSlider("PullOffsetY", { Text = "Pull Y Offset", Default = 1.5, Min = -15, Max = 15, Rounding = 1 }):OnChanged(function() CombatState.pullOffsetY = Options.PullOffsetY.Value end)
 PullSettings:AddSlider("PullMaxTargets", { Text = "Max Pull Targets", Default = 1, Min = 1, Max = 5, Rounding = 0 }):OnChanged(function()
-    pullMaxTargets = Options.PullMaxTargets.Value
+    CombatState.pullMaxTargets = Options.PullMaxTargets.Value
 end)
 WeaponGroup:AddToggle("NoSpread", { Text = "No Spread", Default = false }):OnChanged(function()
-    noSpreadEnabled = Toggles.NoSpread.Value
+    State.noSpreadEnabled = Toggles.NoSpread.Value
 end)
 WeaponGroup:AddToggle("NoRecoil", { Text = "No Recoil", Default = false }):OnChanged(function()
-    noRecoilEnabled = Toggles.NoRecoil.Value
+    State.noRecoilEnabled = Toggles.NoRecoil.Value
 end)
 WeaponGroup:AddToggle("InstantReload", { Text = "Instant Reload", Default = false }):OnChanged(function()
-    instantReloadEnabled = Toggles.InstantReload.Value
+    State.instantReloadEnabled = Toggles.InstantReload.Value
 end)
 WeaponGroup:AddToggle("RapidFire", { Text = "Rapid Fire / Fast Fire", Default = false }):OnChanged(function()
-    rapidFireEnabled = Toggles.RapidFire.Value
+    State.rapidFireEnabled = Toggles.RapidFire.Value
 end)
 
 local function refreshBangPlayerList()
@@ -1686,7 +1707,7 @@ local function getTorso(character)
 end
 
 local function unbangPlayer()
-    bangEnabled = false
+    CombatState.bangEnabled = false
     if bangState.died then
         pcall(function() bangState.died:Disconnect() end)
         bangState.died = nil
@@ -1736,7 +1757,7 @@ local function bangSelectedPlayer()
         return
     end
 
-    bangEnabled = true
+    CombatState.bangEnabled = true
 
     -- Load animation: R6 hoặc R15
     bangState.anim = Instance.new("Animation")
@@ -1746,7 +1767,7 @@ local function bangSelectedPlayer()
 
     bangState.track = myHumanoid:LoadAnimation(bangState.anim)
     bangState.track:Play(0.1, 1, 1)
-    bangState.track:AdjustSpeed(bangSpeed)
+    bangState.track:AdjustSpeed(CombatState.bangSpeed)
 
     -- Dừng animation khi character chết
     bangState.died = myHumanoid.Died:Connect(function()
@@ -1756,7 +1777,7 @@ local function bangSelectedPlayer()
     -- Mỗi frame: lock CFrame của LocalPlayer vào phía sau target
     local bangOffset = CFrame.new(0, 0, 1.1)
     bangState.loop = RunService.Stepped:Connect(function()
-        if not bangEnabled then return end
+        if not CombatState.bangEnabled then return end
         pcall(function()
             local otherTorso = getTorso(targetCharacter)
             local myRoot2 = getRootPart()
@@ -1774,14 +1795,14 @@ end
 local AimbotGroup = CombatTab:AddLeftGroupbox("Aimbot")
 
 AimbotGroup:AddToggle("AimbotEnabled", { Text = "Enable Aimbot", Default = false }):OnChanged(function()
-    aimbotEnabled = Toggles.AimbotEnabled.Value
-    if not aimbotEnabled then
-        aimbotTarget = nil
+    CombatState.aimbotEnabled = Toggles.AimbotEnabled.Value
+    if not CombatState.aimbotEnabled then
+        CombatState.aimbotTarget = nil
     end
 end)
 
 AimbotGroup:AddToggle("AimbotHold", { Text = "Require Right Mouse Hold", Default = true }):OnChanged(function()
-    aimbotHoldEnabled = Toggles.AimbotHold.Value
+    CombatState.aimbotHoldEnabled = Toggles.AimbotHold.Value
 end)
 
 AimbotGroup:AddDropdown("AimbotAimPart", {
@@ -1789,37 +1810,37 @@ AimbotGroup:AddDropdown("AimbotAimPart", {
     Values = { "Head", "HumanoidRootPart", "UpperTorso", "Torso" },
     Default = 1
 }):OnChanged(function(value)
-    aimbotAimPart = value
+    CombatState.aimbotAimPart = value
 end)
 
 AimbotGroup:AddSlider("AimbotFov", { Text = "Aim FOV", Default = 180, Min = 25, Max = 600, Rounding = 0 }):OnChanged(function()
-    aimbotFov = Options.AimbotFov.Value
+    CombatState.aimbotFov = Options.AimbotFov.Value
 end)
 
 AimbotGroup:AddSlider("AimbotSmoothness", { Text = "Smoothness", Default = 18, Min = 1, Max = 100, Rounding = 0 }):OnChanged(function()
-    aimbotSmoothness = Options.AimbotSmoothness.Value / 100
+    CombatState.aimbotSmoothness = Options.AimbotSmoothness.Value / 100
 end)
 
 AimbotGroup:AddToggle("AimbotVisibleOnly", { Text = "Aim Visible Only", Default = true }):OnChanged(function()
-    aimbotVisibleOnly = Toggles.AimbotVisibleOnly.Value
-    aimbotTarget = nil
+    CombatState.aimbotVisibleOnly = Toggles.AimbotVisibleOnly.Value
+    CombatState.aimbotTarget = nil
 end)
 
 AimbotGroup:AddToggle("AimbotLockTarget", { Text = "Lock Target Until Invalid", Default = false }):OnChanged(function()
-    aimbotLockTarget = Toggles.AimbotLockTarget.Value
-    aimbotTarget = nil
+    CombatState.aimbotLockTarget = Toggles.AimbotLockTarget.Value
+    CombatState.aimbotTarget = nil
 end)
 
 AimbotGroup:AddToggle("AimbotShowFov", { Text = "Show FOV", Default = true }):OnChanged(function()
-    aimbotShowFov = Toggles.AimbotShowFov.Value
+    CombatState.aimbotShowFov = Toggles.AimbotShowFov.Value
 end)
 
 AimbotGroup:AddToggle("AimbotShowTargetInfo", { Text = "Show Target Info", Default = true }):OnChanged(function()
-    aimbotShowTargetInfo = Toggles.AimbotShowTargetInfo.Value
+    CombatState.aimbotShowTargetInfo = Toggles.AimbotShowTargetInfo.Value
 end)
 
 AimbotGroup:AddToggle("AimbotShowTargetDistance", { Text = "Show Target Distance", Default = true }):OnChanged(function()
-    aimbotShowTargetDistance = Toggles.AimbotShowTargetDistance.Value
+    CombatState.aimbotShowTargetDistance = Toggles.AimbotShowTargetDistance.Value
 end)
 
 AimbotGroup:AddDivider()
@@ -1927,7 +1948,7 @@ local function getTargetPartByName(char, preferredPartName)
 end
 
 local function getAimbotTargetPart(char)
-    return getTargetPartByName(char, aimbotAimPart)
+    return getTargetPartByName(char, CombatState.aimbotAimPart)
 end
 
 
@@ -1989,15 +2010,15 @@ local function getBestTarget(getTargetPart, maxFov, visibleOnly)
 end
 
 local function getBestAimbotTarget()
-    return getBestTarget(getAimbotTargetPart, aimbotFov, aimbotVisibleOnly)
+    return getBestTarget(getAimbotTargetPart, CombatState.aimbotFov, CombatState.aimbotVisibleOnly)
 end
 
 
 local function getPullTargetPosition(myRoot)
     return (myRoot.CFrame * CFrame.new(
-        math.round(pullOffsetX / pullOffsetXStep) * pullOffsetXStep,
-        math.round(pullOffsetY / pullOffsetYStep) * pullOffsetYStep,
-        -pullDistance
+        math.round(CombatState.pullOffsetX / CombatState.pullOffsetXStep) * CombatState.pullOffsetXStep,
+        math.round(CombatState.pullOffsetY / CombatState.pullOffsetYStep) * CombatState.pullOffsetYStep,
+        -CombatState.pullDistance
     )).Position
 end
 
@@ -2040,7 +2061,7 @@ local function getBestPullTargets(myRoot)
 
             if targetRoot and targetHumanoid and targetHumanoid.Health > 0 and aimPoint then
                 local distance = (myRoot.Position - aimPoint).Magnitude
-                if distance <= pullRadius then
+                if distance <= CombatState.pullRadius then
                     table.insert(candidates, {
                         character = player.Character,
                         distance = distance,
@@ -2056,7 +2077,7 @@ local function getBestPullTargets(myRoot)
     end)
 
     local selectedTargets = {}
-    for i = 1, math.min(pullMaxTargets, #candidates) do
+    for i = 1, math.min(CombatState.pullMaxTargets, #candidates) do
         selectedTargets[i] = candidates[i]
     end
 
@@ -2068,15 +2089,15 @@ local cachedTargetChar = nil
 
 
 local function handlePullChatCommand(player, message)
-    if not player or player.Name ~= pullControlUsername then
+    if not player or player.Name ~= CombatState.pullControlUsername then
         return
     end
 
     local normalizedMessage = string.lower(tostring(message or ""))
     if normalizedMessage == "/stop" then
-        pullPausedByChat = true
+        CombatState.pullPausedByChat = true
     elseif normalizedMessage == "/next" then
-        pullPausedByChat = false
+        CombatState.pullPausedByChat = false
     end
 end
 
@@ -2092,7 +2113,7 @@ for _, player in ipairs(Players:GetPlayers()) do
 end
 
 RunService.RenderStepped:Connect(function()
-    if not pullEnabled or pullPausedByChat then
+    if not CombatState.pullEnabled or CombatState.pullPausedByChat then
         cachedTargetChar = nil
         return
     end
@@ -2120,7 +2141,7 @@ RunService.RenderStepped:Connect(function()
         local targetAimPoint = targetCharacter and getCharacterAimPoint(targetCharacter) or nil
 
         if targetRoot and targetHumanoid and targetHumanoid.Health > 0 and targetAimPoint then
-            local targetPosition = getPullTargetPosition(myRoot) + Vector3.new((index - 1) * pullLiftOffset, 0, 0)
+            local targetPosition = getPullTargetPosition(myRoot) + Vector3.new((index - 1) * CombatState.pullLiftOffset, 0, 0)
             local currentTargetCFrame = targetRoot.CFrame
             targetRoot.CFrame = CFrame.new(targetPosition) * CFrame.Angles(currentTargetCFrame:ToOrientation())
             stopRootMotion(targetRoot)
@@ -2154,9 +2175,9 @@ bangDropdown:OnChanged(function(value)
 end)
 
 BangGroup:AddSlider("BangSpeedSlider", { Text = "Animation Speed", Default = 3, Min = 1, Max = 10, Rounding = 1 }):OnChanged(function()
-    bangSpeed = Options.BangSpeedSlider.Value
+    CombatState.bangSpeed = Options.BangSpeedSlider.Value
     if bangState.track then
-        pcall(function() bangState.track:AdjustSpeed(bangSpeed) end)
+        pcall(function() bangState.track:AdjustSpeed(CombatState.bangSpeed) end)
     end
 end)
 
@@ -2295,9 +2316,9 @@ end)
 
 
 ChatGroup:AddToggle("SpamChat", { Text = "Spam Chat", Default = false }):OnChanged(function()
-    spamChatEnabled = Toggles.SpamChat.Value
-    if spamChatEnabled then
-        lastSpamChatTime = 0
+    State.spamChatEnabled = Toggles.SpamChat.Value
+    if State.spamChatEnabled then
+        State.lastSpamChatTime = 0
     end
 end)
 
@@ -2309,11 +2330,11 @@ ChatGroup:AddInput("SpamChatMessage", {
     Text = "Spam Message",
     Placeholder = "Enter chat message"
 }):OnChanged(function()
-    spamChatMessage = Options.SpamChatMessage.Value
+    State.spamChatMessage = Options.SpamChatMessage.Value
 end)
 
 ChatGroup:AddSlider("SpamChatDelay", { Text = "Spam Delay", Default = 3, Min = 1, Max = 30, Rounding = 1 }):OnChanged(function()
-    spamChatDelay = Options.SpamChatDelay.Value
+    State.spamChatDelay = Options.SpamChatDelay.Value
 end)
 
 ServerGroup:AddButton("Server Hop", function()
@@ -2383,7 +2404,7 @@ RunService.RenderStepped:Connect(function()
         return
     end
 
-    if flyEnabled and flyBV and flyBG then
+    if State.flyEnabled and flyBV and flyBG then
         local root = getRootPart()
         if not root or not Camera then return end
         flyBG.CFrame = Camera.CFrame
@@ -2396,20 +2417,20 @@ RunService.RenderStepped:Connect(function()
         if UserInputService:IsKeyDown(Enum.KeyCode.Space) then dir = dir + Vector3.new(0, 1, 0) end
         if UserInputService:IsKeyDown(Enum.KeyCode.LeftShift) then dir = dir - Vector3.new(0, 1, 0) end
         
-        flyBV.Velocity = dir.Magnitude > 0 and dir.Unit * flySpeed or Vector3.new(0, 0, 0)
+        flyBV.Velocity = dir.Magnitude > 0 and dir.Unit * State.flySpeed or Vector3.new(0, 0, 0)
     end
 end)
 
 -- Main game loop
 Workspace.DescendantAdded:Connect(function(descendant)
     if descendant:IsA("ProximityPrompt") then
-        setPromptInstant(descendant, instantInteractEnabled)
+        setPromptInstant(descendant, State.instantInteractEnabled)
     end
 end)
 
 Workspace.DescendantRemoving:Connect(function(descendant)
     if descendant:IsA("ProximityPrompt") then
-        promptHoldDurations[descendant] = nil
+        State.promptHoldDurations[descendant] = nil
     end
 end)
 
@@ -2429,27 +2450,27 @@ RunService.Heartbeat:Connect(function()
     local humanoid = getHumanoid()
     local equippedTool = character and character:FindFirstChildOfClass("Tool")
 
-    if spamChatEnabled then
+    if State.spamChatEnabled then
         local now = tick()
-        local message = trimString(spamChatMessage)
-        if message ~= "" and now - lastSpamChatTime >= spamChatDelay then
+        local message = trimString(State.spamChatMessage)
+        if message ~= "" and now - State.lastSpamChatTime >= State.spamChatDelay then
             if sendChatMessage(message) then
-                lastSpamChatTime = now
+                State.lastSpamChatTime = now
             end
         end
     end
 
-    if autoPickupEnabled then
+    if State.autoPickupEnabled then
         autoPickupNearbyItems()
     end
 
-    for tool, state in pairs(patchedToolStates) do
+    for tool, state in pairs(State.patchedToolStates) do
         state.active.NoSpread = false
         state.active.InstantReload = false
         state.active.RapidFire = false
 
         local shouldKeepPatched = tool == equippedTool and (
-            noSpreadEnabled or instantReloadEnabled or rapidFireEnabled
+            State.noSpreadEnabled or State.instantReloadEnabled or State.rapidFireEnabled
         )
 
         if not shouldKeepPatched then
@@ -2458,30 +2479,30 @@ RunService.Heartbeat:Connect(function()
     end
 
     if equippedTool then
-        if noSpreadEnabled then
+        if State.noSpreadEnabled then
             patchToolForNoSpread(equippedTool)
         end
 
-        if instantReloadEnabled then
+        if State.instantReloadEnabled then
             patchToolForInstantReload(equippedTool)
         end
 
-        if rapidFireEnabled then
+        if State.rapidFireEnabled then
             patchToolForRapidFire(equippedTool)
         end
     end
 
     if humanoid then
-        if speedEnabled then
+        if State.speedEnabled then
             local method = Options.SpeedMethod and Options.SpeedMethod.Value or "WalkSpeed"
             local moving = humanoid.MoveDirection.Magnitude > 0
 
             if method == "WalkSpeed" then
-                humanoid.WalkSpeed = walkSpeed
+                humanoid.WalkSpeed = State.walkSpeed
             elseif method == "CFrame" and moving and root then
-                root.CFrame = root.CFrame + (humanoid.MoveDirection * (walkSpeed / 60))
+                root.CFrame = root.CFrame + (humanoid.MoveDirection * (State.walkSpeed / 60))
             elseif method == "Velocity" and moving and root then
-                local horizontalVelocity = humanoid.MoveDirection * walkSpeed
+                local horizontalVelocity = humanoid.MoveDirection * State.walkSpeed
                 root.AssemblyLinearVelocity = Vector3.new(horizontalVelocity.X, root.AssemblyLinearVelocity.Y, horizontalVelocity.Z)
             end
         else
@@ -2492,7 +2513,7 @@ RunService.Heartbeat:Connect(function()
         end
     end
     
-    if noclipEnabled then
+    if State.noclipEnabled then
         local char = getCharacter()
         if char then
             for _, part in pairs(char:GetDescendants()) do
@@ -2507,7 +2528,7 @@ RunService.Heartbeat:Connect(function()
         restoreCharacterCollisionState(LocalPlayer.Character)
     end
     
-    if antiWindEnabled and root then
+    if State.antiWindEnabled and root then
         local assemblyRoot = getRootAssembly(root)
         if assemblyRoot then
             local velocity = assemblyRoot.AssemblyLinearVelocity
@@ -2522,7 +2543,7 @@ UserInputService.JumpRequest:Connect(function()
         return
     end
 
-    if infJumpEnabled then
+    if State.infJumpEnabled then
         local humanoid = getHumanoid()
         if humanoid then humanoid:ChangeState(Enum.HumanoidStateType.Jumping) end
     end
@@ -2719,9 +2740,9 @@ end
 
 Workspace.DescendantRemoving:Connect(function(descendant)
     if descendant:IsA("Model") and ESP_Cache[descendant] then RemoveESP(descendant) end
-    if descendant:IsA("Tool") and patchedToolStates[descendant] then
+    if descendant:IsA("Tool") and State.patchedToolStates[descendant] then
         restorePatchedTool(descendant)
-        patchedToolStates[descendant] = nil
+        State.patchedToolStates[descendant] = nil
     end
 end)
 
@@ -2733,43 +2754,43 @@ RunService.RenderStepped:Connect(function()
 
 
     -- Target selection (camera rotation tách riêng ở BindToRenderStep bên dưới)
-    if aimbotEnabled then
+    if CombatState.aimbotEnabled then
         local shouldAim = true
-        if aimbotHoldEnabled then
+        if CombatState.aimbotHoldEnabled then
             shouldAim = UserInputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton2)
         end
         if shouldAim then
-            local currentTargetPart = aimbotTarget and getAimbotTargetPart(aimbotTarget) or nil
+            local currentTargetPart = CombatState.aimbotTarget and getAimbotTargetPart(CombatState.aimbotTarget) or nil
             local currentTargetValid = currentTargetPart
-                and isValidTarget(aimbotTarget)
-                and (not aimbotVisibleOnly or isAimbotTargetVisible(currentTargetPart))
-            if not currentTargetValid or not aimbotLockTarget then
-                aimbotTarget = getBestAimbotTarget()
+                and isValidTarget(CombatState.aimbotTarget)
+                and (not CombatState.aimbotVisibleOnly or isAimbotTargetVisible(currentTargetPart))
+            if not currentTargetValid or not CombatState.aimbotLockTarget then
+                CombatState.aimbotTarget = getBestAimbotTarget()
             end
         else
-            aimbotTarget = nil
+            CombatState.aimbotTarget = nil
         end
     else
-        aimbotTarget = nil
+        CombatState.aimbotTarget = nil
     end
 
     local currentMouse = UserInputService:GetMouseLocation()
     aimbotFovCircle.Position = Vector2.new(currentMouse.X, currentMouse.Y)
-    aimbotFovCircle.Radius = aimbotFov
-    aimbotFovCircle.Visible = aimbotEnabled and aimbotShowFov and Camera ~= nil
+    aimbotFovCircle.Radius = CombatState.aimbotFov
+    aimbotFovCircle.Visible = CombatState.aimbotEnabled and CombatState.aimbotShowFov and Camera ~= nil
 
 
-    if aimbotShowTargetInfo and aimbotTarget and isValidTarget(aimbotTarget) then
-        local targetPart = getAimbotTargetPart(aimbotTarget)
+    if CombatState.aimbotShowTargetInfo and CombatState.aimbotTarget and isValidTarget(CombatState.aimbotTarget) then
+        local targetPart = getAimbotTargetPart(CombatState.aimbotTarget)
         if targetPart then
             local screenPoint, onScreen = Camera:WorldToViewportPoint(targetPart.Position)
             if onScreen and screenPoint.Z > 0 then
                 local distance = math.floor((Camera.CFrame.Position - targetPart.Position).Magnitude)
-                local targetName = aimbotTarget.Name
-                if aimbotShowTargetDistance then
+                local targetName = CombatState.aimbotTarget.Name
+                if CombatState.aimbotShowTargetDistance then
                     aimbotFovCircle.Color = Color3.fromRGB(255, 255, 255)
                     aimbotFovCircle.NumSides = 64
-                    aimbotFovCircle.Radius = aimbotFov
+                    aimbotFovCircle.Radius = CombatState.aimbotFov
                 end
                 -- target info is intentionally lightweight and stays client-side
                 -- use existing visuals without adding extra UI objects
@@ -2921,33 +2942,33 @@ applyLightingState()
 
 -- Aimbot camera override: chạy SAU camera module Roblox → fix góc nhìn thứ 3
 RunService:BindToRenderStep("AimbotCamOverride", Enum.RenderPriority.Camera.Value + 1, function()
-    if not aimbotEnabled or not Camera then return end
-    if not aimbotTarget then return end
+    if not CombatState.aimbotEnabled or not Camera then return end
+    if not CombatState.aimbotTarget then return end
 
     local shouldAim = true
-    if aimbotHoldEnabled then
+    if CombatState.aimbotHoldEnabled then
         shouldAim = UserInputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton2)
     end
     if not shouldAim then return end
 
-    local targetPart = getAimbotTargetPart(aimbotTarget)
-    if not targetPart or not isValidTarget(aimbotTarget) then
-        aimbotTarget = nil
+    local targetPart = getAimbotTargetPart(CombatState.aimbotTarget)
+    if not targetPart or not isValidTarget(CombatState.aimbotTarget) then
+        CombatState.aimbotTarget = nil
         return
     end
-    if aimbotVisibleOnly and not isAimbotTargetVisible(targetPart) then return end
+    if CombatState.aimbotVisibleOnly and not isAimbotTargetVisible(targetPart) then return end
 
     local origin = Camera.CFrame.Position
     local destination = targetPart.Position
     local aimCFrame = CFrame.new(origin, destination)
-    Camera.CFrame = Camera.CFrame:Lerp(aimCFrame, math.clamp(aimbotSmoothness, 0.01, 1))
+    Camera.CFrame = Camera.CFrame:Lerp(aimCFrame, math.clamp(CombatState.aimbotSmoothness, 0.01, 1))
 end)
 
 -- No Recoil
 do
     local noRecoilCF = nil
     RunService.RenderStepped:Connect(function()
-        if not noRecoilEnabled then
+        if not State.noRecoilEnabled then
             noRecoilCF = nil
             return
         end
