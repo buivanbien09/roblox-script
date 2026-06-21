@@ -1159,6 +1159,13 @@ MovementGroup:AddToggle("NoclipToggle", { Text = "Noclip", Default = false }):On
         humanoid:ChangeState(Enum.HumanoidStateType.GettingUp)
     end
 end)
+-- KeyPicker gan truc tiep vao Toggle → SyncToggleState tu dong doi mau xanh/trang
+Toggles.NoclipToggle:AddKeyPicker("NoclipKey", {
+    Default = "N",
+    SyncToggleState = true,
+    Mode = "Toggle",
+    Text = "Noclip",
+})
 MovementGroup:AddToggle("ClickTP", { Text = "Teleport To Mouse (T)", Default = false }):OnChanged(function()
     State.clickTPEnabled = Toggles.ClickTP.Value
 
@@ -1454,6 +1461,12 @@ FlyGroup:AddToggle("FlyToggle", { Text = "Fly", Default = false }):OnChanged(fun
     State.flyEnabled = Toggles.FlyToggle.Value
     if State.flyEnabled then startFly() else stopFly() end
 end)
+Toggles.FlyToggle:AddKeyPicker("FlyKey", {
+    Default = "F",
+    SyncToggleState = true,
+    Mode = "Toggle",
+    Text = "Fly",
+})
 FlyGroup:AddSlider("FlySpeedSlider", { Text = "Fly Speed", Default = 50, Min = 10, Max = 200, Rounding = 0 }):OnChanged(function() State.flySpeed = Options.FlySpeedSlider.Value end)
 FlyGroup:AddToggle("AutoClimbToggle", { Text = "Auto Climb", Default = false }):OnChanged(function()
     State.autoClimbEnabled = Toggles.AutoClimbToggle.Value
@@ -1647,6 +1660,12 @@ aimbotFovCircle.Visible = false
 
 
 PullGroup:AddToggle("PullPlayers", { Text = "Pull Players/Bots (Client-side)", Default = false }):OnChanged(function() CombatState.pullEnabled = Toggles.PullPlayers.Value end)
+Toggles.PullPlayers:AddKeyPicker("PullKey", {
+    Default = "P",
+    SyncToggleState = true,
+    Mode = "Toggle",
+    Text = "Pull Players",
+})
 PullSettings:AddSlider("PullRadius", { Text = "Pull Radius", Default = 80, Min = 10, Max = 1000, Rounding = 0 }):OnChanged(function() CombatState.pullRadius = Options.PullRadius.Value end)
 PullSettings:AddSlider("PullDistance", { Text = "Pull Distance", Default = 5, Min = 2, Max = 15, Rounding = 0 }):OnChanged(function() CombatState.pullDistance = Options.PullDistance.Value end)
 PullSettings:AddSlider("PullOffsetX", { Text = "Pull X Offset", Default = 0, Min = -15, Max = 15, Rounding = 1 }):OnChanged(function() CombatState.pullOffsetX = Options.PullOffsetX.Value end)
@@ -2402,11 +2421,8 @@ MenuGroup:AddToggle('ShowKeybinds', { Text = 'Show Keybinds Menu', Default = tru
 end)
 
 
-KeyGroup:AddLabel("Fly"):AddKeyPicker("FlyKey", { Default = "F", SyncToggleState = false, Mode = "Toggle", Text = "Fly", NoUI = false, Callback = function() Toggles.FlyToggle:SetValue(not Toggles.FlyToggle.Value) end })
-KeyGroup:AddLabel("Noclip"):AddKeyPicker("NoclipKey", { Default = "N", SyncToggleState = false, Mode = "Toggle", Text = "Noclip", NoUI = false, Callback = function() Toggles.NoclipToggle:SetValue(not Toggles.NoclipToggle.Value) end })
-
--- Added: bind P to toggle Pull Players.
-KeyGroup:AddLabel("Pull Players"):AddKeyPicker("PullKey", { Default = "P", SyncToggleState = false, Mode = "Toggle", Text = "Pull Players", NoUI = false, Callback = function() Toggles.PullPlayers:SetValue(not Toggles.PullPlayers.Value) end })
+-- Keybinds duoc hien thi tu dong trong Keybind List vi da dung Toggle:AddKeyPicker()
+-- voi SyncToggleState = true o tren. Khong can khai bao lai o day.
 
 ThemeManager:SetLibrary(Library)
 SaveManager:SetLibrary(Library)
