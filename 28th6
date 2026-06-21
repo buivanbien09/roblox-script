@@ -2416,6 +2416,13 @@ SaveManager:IgnoreThemeSettings()
 SaveManager:SetIgnoreIndexes({ "DeleteConfigName", "JoinJobIdInput", "SpamChatMessage" })
 ThemeManager:ApplyToTab(SettingsTab)
 
+-- Tao UI quan ly config (Save / Load / Delete / dat Autoload)
+SaveManager:BuildConfigSection(SettingsTab)
+
+-- Tu dong load config da duoc danh dau autoload tu lan truoc
+-- Tat ca toggle & slider se duoc khoi phuc nguyen ven
+SaveManager:LoadAutoloadConfig()
+
 
 -- ============ GAME LOOPS ============
 
