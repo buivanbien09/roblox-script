@@ -3,7 +3,7 @@
     LinoriaLib GUI - Modern ESP Updated
 ]]
 
--- author Bien
+--  Bien
 
 -- Load LinoriaLib
 local repo = "https://raw.githubusercontent.com/violin-suzutsuki/LinoriaLib/main/"
