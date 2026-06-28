@@ -85,6 +85,9 @@ local State = {
     savedTeleportPoints = {},
     autoPickupEnabled = false,
     autoPickupRadius = 15,
+    lastAutoPickupTime = 0,
+    lastESPScanTime = 0,
+    lastAimbotScanTime = 0,
 }
 
 -- Weak table: khi tool bi GC (key la weak), entry tu dong xoa khoi bang
@@ -2411,10 +2414,11 @@ local MenuGroup = SettingsTab:AddLeftGroupbox("Menu")
 local KeyGroup = SettingsTab:AddRightGroupbox("Keybinds")
 
 MenuGroup:AddButton("Unload Script", function() Library:Unload() end)
-MenuGroup:AddLabel("Toggle UI: Right Shift")
+MenuGroup:AddLabel('Menu bind'):AddKeyPicker('MenuKeybind', { Default = 'RightShift', NoUI = true, Text = 'Menu keybind' })
+Library.ToggleKeybind = Options.MenuKeybind
 
 -- Added: toggle the on-screen keybind list.
-MenuGroup:AddToggle('ShowKeybinds', { Text = 'Show Keybinds Menu', Default = true }):OnChanged(function()
+KeyGroup:AddToggle('ShowKeybinds', { Text = 'Show Keybinds Menu', Default = true }):OnChanged(function()
     if Library.KeybindFrame then
         Library.KeybindFrame.Visible = Toggles.ShowKeybinds.Value
     end
@@ -2507,7 +2511,11 @@ RunService.Heartbeat:Connect(function()
     end
 
     if State.autoPickupEnabled then
-        autoPickupNearbyItems()
+        local now = tick()
+        if now - State.lastAutoPickupTime > 0.3 then
+            State.lastAutoPickupTime = now
+            task.spawn(autoPickupNearbyItems)
+        end
     end
 
     for tool, state in pairs(State.patchedToolStates) do
@@ -2672,6 +2680,16 @@ local function updateSkeletonESP(char, esp)
         return
     end
 
+    local myRoot = getRootPart()
+    local targetRoot = char and char:FindFirstChild("HumanoidRootPart")
+    if myRoot and targetRoot then
+        local distance = (myRoot.Position - targetRoot.Position).Magnitude
+        if distance > 250 then
+            hideSkeletonLines(esp.SkeletonLines)
+            return
+        end
+    end
+
     local head = getSkeletonPoint(char, "Head")
     local upperTorso = getSkeletonPoint(char, "UpperTorso") or getSkeletonPoint(char, "Torso")
     local lowerTorso = getSkeletonPoint(char, "LowerTorso") or upperTorso
@@ -2814,7 +2832,11 @@ RunService.RenderStepped:Connect(function()
                 and isValidTarget(CombatState.aimbotTarget)
                 and (not CombatState.aimbotVisibleOnly or isAimbotTargetVisible(currentTargetPart))
             if not currentTargetValid or not CombatState.aimbotLockTarget then
-                CombatState.aimbotTarget = getBestAimbotTarget()
+                local now = tick()
+                if now - State.lastAimbotScanTime > 0.1 then
+                    State.lastAimbotScanTime = now
+                    CombatState.aimbotTarget = getBestAimbotTarget()
+                end
             end
         else
             CombatState.aimbotTarget = nil
@@ -2859,14 +2881,26 @@ RunService.RenderStepped:Connect(function()
         end
     end
 
-    for _, char in ipairs(Workspace:GetChildren()) do
+    local now = tick()
+    if now - State.lastESPScanTime > 0.5 then
+        State.lastESPScanTime = now
+        for _, char in ipairs(Workspace:GetChildren()) do
+            if char:IsA("Model") and char ~= LocalPlayer.Character then
+                local hum = char:FindFirstChildOfClass("Humanoid")
+                local root = char:FindFirstChild("HumanoidRootPart")
+                if hum and hum.Health > 0 and root and hum:GetState() ~= Enum.HumanoidStateType.Dead then
+                    if not ESP_Cache[char] then CreateESP(char) end
+                end
+            end
+        end
+    end
+
+    for char, esp in pairs(ESP_Cache) do
         if char:IsA("Model") and char ~= LocalPlayer.Character then
             local hum = char:FindFirstChildOfClass("Humanoid")
             local root = char:FindFirstChild("HumanoidRootPart")
 
             if hum and hum.Health > 0 and root and hum:GetState() ~= Enum.HumanoidStateType.Dead then
-                if not ESP_Cache[char] then CreateESP(char) end
-                local esp = ESP_Cache[char]
         
                 local head = char:FindFirstChild("Head")
                 
@@ -3044,7 +3078,7 @@ do
     end
 end
 
-Library.ToggleKeybind = Enum.KeyCode.RightShift
+-- Menu keybind is handled dynamically in the Settings tab
 
 -- =====================================================================
 -- Memory cleanup khi script unload / game dong
