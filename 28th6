@@ -3,7 +3,7 @@
     LinoriaLib GUI - Modern ESP Updated
 ]]
 
--- Bien
+--  Bien
 
 -- Load LinoriaLib
 local repo = "https://raw.githubusercontent.com/violin-suzutsuki/LinoriaLib/main/"
@@ -78,6 +78,9 @@ local State = {
     textChatService = game:FindService("TextChatService"),
     detectedTeamCheckMode = nil,
     lastDetectedTeamCheckMode = nil,
+    teamCheckConfidence = 0,
+    lastTeamCheckScanTime = 0,
+    teamCheckScanInterval = 5, -- Re-scan moi 5 giay
     noSpreadEnabled = false,
     noRecoilEnabled = false,
     vehicleFlyEnabled = false,
@@ -92,7 +95,7 @@ local State = {
     lastAimbotScanTime = 0,
     hitboxExpanderEnabled = false,
     hitboxExpanderSize = 5,
-    hitboxExpanderPart = "Head",
+    hitboxExpanderPart = "head",
     hitboxExpanderTransparency = 0.5,
     flingAuraEnabled = false,
     flingAuraSpeed = 500,
@@ -800,75 +803,197 @@ local function sendChatMessage(message)
     return false
 end
 
+-- He thong Auto Detect thong minh hon:
+-- 1. Dung he thong diem so (scoring) de tim ra phuong phap TIN CAY nhat
+-- 2. Cache ket qua + chi re-scan moi N giay (tranh spam scan)
+-- 3. Khi co nhieu nguoi choi o nhieu doi khac nhau → chon method phan biet duoc nhieu nhat
 local function getAvailableTeamCheckMode()
     local myChar = LocalPlayer.Character
-    if not myChar then
-        return nil
-    end
-
-    local hasRobloxTeam = false
-    local hasFactionType = false
-    local hasTeamAttribute = false
-    local hasIntTeamValue = false
-    local hasStringTeamValue = false
-    local hasTeamColor = false
+    if not myChar then return nil end
 
     local otherPlayers = Players:GetPlayers()
-    for _, player in ipairs(otherPlayers) do
-        if player ~= LocalPlayer and player.Character then
-            if LocalPlayer.Team ~= nil and player.Team ~= nil then
-                hasRobloxTeam = true
+    -- Can it nhat 1 nguoi khac de so sanh
+    local enemies = {}
+    for _, p in ipairs(otherPlayers) do
+        if p ~= LocalPlayer and p.Character then
+            table.insert(enemies, p)
+        end
+    end
+    if #enemies == 0 then return nil end
+
+    -- Moi method duoc chay qua tat ca nguoi choi va ghi diem:
+    -- +1 neu method tra ve ket qua hop le (khong phai nil/false/false khi 2 nguoi ro rang khac doi)
+    -- Method nao cho ket qua phan bien tot nhat (co nguoi cung doi, co nguoi khac doi) thi duoc chon
+    local methods = {
+        {
+            name = "Roblox Teams",
+            priority = 100, -- Cao nhat: day la he thong chinh thuc cua Roblox
+            check = function(p)
+                return LocalPlayer.Team ~= nil and p.Team ~= nil
+            end,
+            same = function(p)
+                return LocalPlayer.Team == p.Team
+            end
+        },
+        {
+            name = "TeamColor",
+            priority = 90,
+            check = function(p)
+                return LocalPlayer.TeamColor ~= nil and p.TeamColor ~= nil
+            end,
+            same = function(p)
+                return LocalPlayer.TeamColor == p.TeamColor
+            end
+        },
+        {
+            name = "FactionType Attribute",
+            priority = 85,
+            check = function(p)
+                local a = myChar:GetAttribute("FactionType")
+                local b = p.Character and p.Character:GetAttribute("FactionType")
+                return a ~= nil and b ~= nil
+            end,
+            same = function(p)
+                local a = myChar:GetAttribute("FactionType")
+                local b = p.Character and p.Character:GetAttribute("FactionType")
+                return a == b
+            end
+        },
+        {
+            name = "Team Attribute",
+            priority = 80,
+            check = function(p)
+                local a = myChar:GetAttribute("Team") or LocalPlayer:GetAttribute("Team")
+                local b = p.Character and (p.Character:GetAttribute("Team") or p:GetAttribute("Team"))
+                return a ~= nil and b ~= nil
+            end,
+            same = function(p)
+                local a = myChar:GetAttribute("Team") or LocalPlayer:GetAttribute("Team")
+                local b = p.Character and (p.Character:GetAttribute("Team") or p:GetAttribute("Team"))
+                return a == b
+            end
+        },
+        {
+            name = "Role Attribute",
+            priority = 75,
+            check = function(p)
+                local a = myChar:GetAttribute("Role") or LocalPlayer:GetAttribute("Role")
+                local b = p.Character and (p.Character:GetAttribute("Role") or p:GetAttribute("Role"))
+                return a ~= nil and b ~= nil
+            end,
+            same = function(p)
+                local a = myChar:GetAttribute("Role") or LocalPlayer:GetAttribute("Role")
+                local b = p.Character and (p.Character:GetAttribute("Role") or p:GetAttribute("Role"))
+                return a == b
+            end
+        },
+        {
+            name = "Crew / Guild Tag",
+            priority = 70,
+            check = function(p)
+                local a = LocalPlayer:GetAttribute("Crew") or LocalPlayer:GetAttribute("Guild")
+                local b = p:GetAttribute("Crew") or p:GetAttribute("Guild")
+                return a ~= nil and b ~= nil
+            end,
+            same = function(p)
+                local a = LocalPlayer:GetAttribute("Crew") or LocalPlayer:GetAttribute("Guild")
+                local b = p:GetAttribute("Crew") or p:GetAttribute("Guild")
+                return a == b
+            end
+        },
+        {
+            name = "IntValue (Team)",
+            priority = 60,
+            check = function(p)
+                local va = myChar:FindFirstChild("Team") or LocalPlayer:FindFirstChild("Team")
+                local vb = p.Character and (p.Character:FindFirstChild("Team") or p:FindFirstChild("Team"))
+                return va and va:IsA("IntValue") and vb and vb:IsA("IntValue")
+            end,
+            same = function(p)
+                local va = myChar:FindFirstChild("Team") or LocalPlayer:FindFirstChild("Team")
+                local vb = p.Character and (p.Character:FindFirstChild("Team") or p:FindFirstChild("Team"))
+                if va and vb then return va.Value == vb.Value end
+                return false
+            end
+        },
+        {
+            name = "StringValue (Team)",
+            priority = 60,
+            check = function(p)
+                local va = myChar:FindFirstChild("Team") or LocalPlayer:FindFirstChild("Team")
+                local vb = p.Character and (p.Character:FindFirstChild("Team") or p:FindFirstChild("Team"))
+                return va and va:IsA("StringValue") and vb and vb:IsA("StringValue") and va.Value ~= ""
+            end,
+            same = function(p)
+                local va = myChar:FindFirstChild("Team") or LocalPlayer:FindFirstChild("Team")
+                local vb = p.Character and (p.Character:FindFirstChild("Team") or p:FindFirstChild("Team"))
+                if va and vb then return va.Value == vb.Value end
+                return false
+            end
+        },
+        {
+            name = "Shirt Template",
+            priority = 30,
+            check = function(p)
+                local a = myChar:FindFirstChildOfClass("Shirt")
+                local b = p.Character and p.Character:FindFirstChildOfClass("Shirt")
+                return a and b and a.ShirtTemplate ~= "" and b.ShirtTemplate ~= ""
+            end,
+            same = function(p)
+                local a = myChar:FindFirstChildOfClass("Shirt")
+                local b = p.Character and p.Character:FindFirstChildOfClass("Shirt")
+                if a and b then return a.ShirtTemplate == b.ShirtTemplate end
+                return false
+            end
+        },
+    }
+
+    -- Chay qua tat ca method, tim method nao:
+    -- 1. Co du lieu hop le (check() = true)
+    -- 2. Co kha nang phan biet: it nhat 1 nguoi CUNG doi va it nhat 1 nguoi KHAC doi
+    --    → gam 2 dieu nay thi method moi thuc su co ich
+    -- Neu khong co du du lieu de kiem tra => fallback ve method co priority cao nhat ma check() = true
+    local bestMethod = nil
+    local bestScore  = -1
+
+    for _, m in ipairs(methods) do
+        local validCount   = 0
+        local sameCount    = 0
+        local diffCount    = 0
+
+        for _, p in ipairs(enemies) do
+            if p.Character then
+                local ok = pcall(function()
+                    if m.check(p) then
+                        validCount = validCount + 1
+                        if m.same(p) then
+                            sameCount = sameCount + 1
+                        else
+                            diffCount = diffCount + 1
+                        end
+                    end
+                end)
+            end
+        end
+
+        if validCount > 0 then
+            -- Score = priority + bonus neu phan biet duoc ca 2 phia
+            local discriminationBonus = 0
+            if sameCount > 0 and diffCount > 0 then
+                discriminationBonus = 50 -- Method phan biet duoc ca dong doi lan ke dich
+            elseif diffCount > 0 then
+                discriminationBonus = 20 -- Chi phan biet ke dich (cung hop le)
             end
 
-            local myFaction = myChar:GetAttribute("FactionType")
-            local theirFaction = player.Character:GetAttribute("FactionType")
-            if myFaction ~= nil and theirFaction ~= nil then
-                hasFactionType = true
-            end
-
-            local myTeamAttribute = myChar:GetAttribute("Team") or LocalPlayer:GetAttribute("Team")
-            local theirTeamAttribute = player.Character:GetAttribute("Team") or player:GetAttribute("Team")
-            if myTeamAttribute ~= nil and theirTeamAttribute ~= nil then
-                hasTeamAttribute = true
-            end
-
-            local myTeamValue = myChar:FindFirstChild("Team") or LocalPlayer:FindFirstChild("Team")
-            local theirTeamValue = player.Character:FindFirstChild("Team") or player:FindFirstChild("Team")
-            if myTeamValue and theirTeamValue then
-                if myTeamValue:IsA("IntValue") and theirTeamValue:IsA("IntValue") then
-                    hasIntTeamValue = true
-                end
-                if myTeamValue:IsA("StringValue") and theirTeamValue:IsA("StringValue") then
-                    hasStringTeamValue = true
-                end
-            end
-
-            if LocalPlayer.TeamColor ~= nil and player.TeamColor ~= nil then
-                hasTeamColor = true
+            local score = m.priority + discriminationBonus
+            if score > bestScore then
+                bestScore  = score
+                bestMethod = m.name
             end
         end
     end
 
-    if hasRobloxTeam then
-        return "Roblox Teams"
-    end
-    if hasFactionType then
-        return "FactionType Attribute"
-    end
-    if hasTeamAttribute then
-        return "Team Attribute"
-    end
-    if hasIntTeamValue then
-        return "IntValue (Team)"
-    end
-    if hasStringTeamValue then
-        return "StringValue (Team)"
-    end
-    if hasTeamColor then
-        return "TeamColor"
-    end
-
-    return nil
+    return bestMethod
 end
 
 -- Team Check helper (Moved up for global access)
@@ -886,17 +1011,26 @@ local function isSameTeam(player)
         mode = Options.TeamCheckMode.Value or "Auto Detect"
     end
     if mode == "Auto Detect" then
-        State.detectedTeamCheckMode = getAvailableTeamCheckMode()
-        if State.detectedTeamCheckMode ~= State.lastDetectedTeamCheckMode then
-            State.lastDetectedTeamCheckMode = State.detectedTeamCheckMode
-            if State.detectedTeamCheckMode then
-                notify("Auto detected team check: " .. State.detectedTeamCheckMode, 3)
+        -- Chi re-scan sau moi State.teamCheckScanInterval giay (tranh spam scan moi frame)
+        local now = tick()
+        if now - State.lastTeamCheckScanTime > State.teamCheckScanInterval or State.detectedTeamCheckMode == nil then
+            State.lastTeamCheckScanTime = now
+            local detected = getAvailableTeamCheckMode()
+            if detected ~= State.detectedTeamCheckMode then
+                State.detectedTeamCheckMode = detected
+                if detected then
+                    notify("🔍 Auto detect: " .. detected, 4)
+                else
+                    notify("⚠️ Auto detect: Khong tim thay method phu hop", 4)
+                end
             end
+            State.lastDetectedTeamCheckMode = State.detectedTeamCheckMode
         end
         mode = State.detectedTeamCheckMode or "Auto (Try All)"
     else
         State.detectedTeamCheckMode = nil
         State.lastDetectedTeamCheckMode = nil
+        State.lastTeamCheckScanTime = 0
     end
 
     local function checkRobloxTeam()
@@ -950,6 +1084,43 @@ local function isSameTeam(player)
         end
         return false
     end
+    
+    local function checkRoleAttribute()
+        local a = myChar:GetAttribute("Role") or LocalPlayer:GetAttribute("Role")
+        local b = theirChar:GetAttribute("Role") or player:GetAttribute("Role")
+        if a ~= nil and b ~= nil then return a == b end
+        return false
+    end
+    
+    local function checkCrewTag()
+        local a = LocalPlayer:GetAttribute("Crew") or LocalPlayer:GetAttribute("Guild")
+        local b = player:GetAttribute("Crew") or player:GetAttribute("Guild")
+        if a ~= nil and b ~= nil then return a == b end
+        return false
+    end
+    
+    local function checkDisplayNameColor()
+        -- Game like Phantom Forces might color names in leaderboard or custom UIs, but for general purposes, if they have custom name tags in character:
+        local a = myChar:FindFirstChild("Head") and myChar.Head:FindFirstChildOfClass("BillboardGui")
+        local b = theirChar:FindFirstChild("Head") and theirChar.Head:FindFirstChildOfClass("BillboardGui")
+        if a and b then
+            local tL_A = a:FindFirstChildOfClass("TextLabel", true)
+            local tL_B = b:FindFirstChildOfClass("TextLabel", true)
+            if tL_A and tL_B then
+                return tL_A.TextColor3 == tL_B.TextColor3
+            end
+        end
+        return false
+    end
+    
+    local function checkShirtTemplate()
+        local a = myChar:FindFirstChildOfClass("Shirt")
+        local b = theirChar:FindFirstChildOfClass("Shirt")
+        if a and b and a.ShirtTemplate ~= "" and b.ShirtTemplate ~= "" then
+            return a.ShirtTemplate == b.ShirtTemplate
+        end
+        return false
+    end
 
     if mode == "Roblox Teams" then return checkRobloxTeam()
     elseif mode == "FactionType Attribute" then return checkFactionType()
@@ -957,9 +1128,23 @@ local function isSameTeam(player)
     elseif mode == "IntValue (Team)" then return checkIntValue()
     elseif mode == "StringValue (Team)" then return checkStringValue()
     elseif mode == "TeamColor" then return checkTeamColor()
-    else
-        return checkRobloxTeam() or checkFactionType() or checkTeamAttribute() or checkIntValue() or checkStringValue() or checkTeamColor()
+    elseif mode == "Role Attribute" then return checkRoleAttribute()
+    elseif mode == "Crew / Guild Tag" then return checkCrewTag()
+    elseif mode == "Display Name Color" then return checkDisplayNameColor()
+    elseif mode == "Shirt Template" then return checkShirtTemplate()
+    elseif mode == "Auto (Try All)" then
+        if checkRobloxTeam() then return true end
+        if checkFactionType() then return true end
+        if checkTeamAttribute() then return true end
+        if checkIntValue() then return true end
+        if checkStringValue() then return true end
+        if checkTeamColor() then return true end
+        if checkRoleAttribute() then return true end
+        if checkCrewTag() then return true end
+        if checkShirtTemplate() then return true end
+        -- Display Name color can be risky for try all
     end
+    return false
 end
 
 -- Fly System (dung LinearVelocity + AlignOrientation thay cho BodyVelocity/BodyGyro cu)
@@ -1626,6 +1811,13 @@ aimbotFovCircle.Filled = false
 aimbotFovCircle.Transparency = 1
 aimbotFovCircle.Visible = false
 
+local aimbotTargetText = Drawing.new("Text")
+aimbotTargetText.Color = Color3.fromRGB(255, 255, 255)
+aimbotTargetText.Size = 16
+aimbotTargetText.Center = true
+aimbotTargetText.Outline = true
+aimbotTargetText.Visible = false
+
 -- Aimbot
 AimbotGroup:AddToggle("AimbotEnabled", { Text = "Enable Aimbot", Default = false }):OnChanged(function()
     CombatState.aimbotEnabled = Toggles.AimbotEnabled.Value
@@ -1827,7 +2019,8 @@ ESPGroup:AddDropdown("TeamCheckMode", {
     Text = "Team Check Mode",
     Values = {
         "Auto Detect", "Auto (Try All)", "Roblox Teams", "FactionType Attribute",
-        "Team Attribute", "IntValue (Team)", "StringValue (Team)", "TeamColor"
+        "Team Attribute", "IntValue (Team)", "StringValue (Team)", "TeamColor",
+        "Role Attribute", "Crew / Guild Tag", "Display Name Color", "Shirt Template"
     },
     Default = 1
 })
@@ -2742,24 +2935,31 @@ RunService.RenderStepped:Connect(function()
     aimbotFovCircle.Visible = CombatState.aimbotEnabled and CombatState.aimbotShowFov and Camera ~= nil
 
 
-    if CombatState.aimbotShowTargetInfo and CombatState.aimbotTarget and isValidTarget(CombatState.aimbotTarget) then
+    local showInfo = CombatState.aimbotShowTargetInfo and CombatState.aimbotTarget and isValidTarget(CombatState.aimbotTarget)
+    if showInfo then
         local targetPart = getAimbotTargetPart(CombatState.aimbotTarget)
         if targetPart then
             local screenPoint, onScreen = Camera:WorldToViewportPoint(targetPart.Position)
             if onScreen and screenPoint.Z > 0 then
                 local distance = math.floor((Camera.CFrame.Position - targetPart.Position).Magnitude)
                 local targetName = CombatState.aimbotTarget.Name
+                local displayText = targetName
+                
                 if CombatState.aimbotShowTargetDistance then
-                    aimbotFovCircle.Color = Color3.fromRGB(255, 255, 255)
-                    aimbotFovCircle.NumSides = 64
-                    aimbotFovCircle.Radius = CombatState.aimbotFov
+                    displayText = string.format("%s [%d]", targetName, distance)
                 end
-                -- target info is intentionally lightweight and stays client-side
-                -- use existing visuals without adding extra UI objects
-                _ = targetName
-                _ = distance
+                
+                aimbotTargetText.Text = displayText
+                aimbotTargetText.Position = Vector2.new(screenPoint.X, screenPoint.Y + 20)
+                aimbotTargetText.Visible = true
+            else
+                aimbotTargetText.Visible = false
             end
+        else
+            aimbotTargetText.Visible = false
         end
+    else
+        aimbotTargetText.Visible = false
     end
 
     for char, esp in pairs(ESP_Cache) do
@@ -2792,12 +2992,14 @@ RunService.RenderStepped:Connect(function()
             local root = char:FindFirstChild("HumanoidRootPart")
 
             if hum and hum.Health > 0 and root and hum:GetState() ~= Enum.HumanoidStateType.Dead then
-        
                 local head = char:FindFirstChild("Head")
-                
                 local isAlive = root and head and hum.Health > 0
+                
+                -- ESP dung bo loc rieng (chi can con song va khong phai dong doi)
+                -- KHONG dung isValidTarget() vi ham do loc qua chat (NPC filter, EntityState...)
+                -- va se vo tinh loai bo ca nguoi that trong 1 so game
                 local plr = Players:GetPlayerFromCharacter(char)
-                local isTeammate = plr and isSameTeam(plr) or false
+                local isTeammate = ESPSettings.TeamCheck and plr and isSameTeam(plr) or false
                 
                 local shouldShow = ESPSettings.Enabled and isAlive and not isTeammate
                 
@@ -2986,6 +3188,12 @@ local function fullCleanup()
     pcall(function()
         aimbotFovCircle.Visible = false
         aimbotFovCircle:Remove()
+    end)
+    pcall(function()
+        if aimbotTargetText then
+            aimbotTargetText.Visible = false
+            aimbotTargetText:Remove()
+        end
     end)
 end
 
