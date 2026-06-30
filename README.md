@@ -1,184 +1,52 @@
-# 28th6 Hub
+# 28th6 Hub 🚀
 
-Script Roblox sử dụng **LinoriaLib GUI** với ESP hiện đại, hỗ trợ đa tính năng.
-
-> **Tác giả:** Bien  
-> **GUI:** LinoriaLib  
-> **Ngôn ngữ:** Lua  
+A highly advanced and fully optimized Universal Roblox script built on the beautiful [LinoriaLib](https://github.com/violin-suzutsuki/LinoriaLib) UI framework. This script is designed to be lightweight, lag-free, and compatible with a wide variety of games. It features powerful combat mechanics, deep visual enhancements, and movement exploits.
 
 ---
 
-## Cài đặt
+## 🌟 Key Features
 
-Dán đoạn sau vào executor và nhấn **Execute (F9)**:
+### ⚔️ Combat
+- **Aimbot / Silent Aim**: Highly precise aiming with FOV circle, hit chance calculation, distance checks, and wall checks.
+- **Universal Kill Aura**: Automatically attacks targets within a specified radius. Includes **4 distinct network bypass methods** to work on various game architectures:
+  - `WeaponHit` (Game 1)
+  - `RequestActionSync` (Game 2)
+  - `GunRemote` (Game 3)
+  - `WeaponsSystem` (Game 4)
+- **Hitbox Expander**: Enlarges enemy hitboxes (Head, Torso, or Root) and makes them partially transparent, allowing you to hit targets effortlessly without precise aiming.
 
-```lua
-loadstring(game:HttpGet("https://raw.githubusercontent.com/buivanbien09/roblox-script/refs/heads/main/28th6"))()
-```
+### 👁️ Visuals (ESP)
+- Fully customizable ESP with dynamic, perfectly aligned bounding boxes.
+- **Skeletons (Bones)**, Tracers, Player Names, Health Bars, Distance, and current Weapon display.
+- Advanced settings: Custom colors, Team Check, and Wall Check (Visibility).
 
-> Yêu cầu executor hỗ trợ `HttpGet` và `Drawing` API (Synapse X, KRNL, Fluxus...).
+### 🏃 Movement
+- **Speed & Flight**: WalkSpeed multipliers, Infinite Jump, Noclip, and Fly (with Float/Lock-Y options).
+- **Auto-Climb & Auto-Walk**: Automatically climb up walls and automatically walk forward independently of other keypresses.
+- **Vehicle Fly**: Take control of vehicles and fly them through the sky.
+- **Misc Movement**: Spin Player (Spinbot), Freeze Position, and Anti-Wind (ignore map wind physics).
 
----
+### 🛠️ Misc & Utility
+- **Instant Interact**: Bypass long wait times on Proximity Prompts (press E instantly).
+- **Auto Pickup**: Automatically grabs nearby dropped tools/items and teleports them to your inventory.
+- **Anti-AFK**: Silently prevents Roblox from kicking you after 20 minutes of inactivity.
+- **Integrated Debugger**: Built-in tab to instantly load **SimpleSpy V3** for intercepting and analyzing RemoteEvents/RemoteFunctions.
 
-## Phím tắt
-
-| Phím | Tính năng |
-|---|---|
-| `F` | Bật / tắt Fly |
-| `N` | Bật / tắt Noclip |
-| `P` | Bật / tắt Pull Players |
-| `RightShift` | Ẩn / hiện menu |
-| `T` | Teleport tới chuột *(khi bật Click TP)* |
-
-> Tất cả hotkey đồng bộ màu với toggle trong menu (xanh = đang bật).
-
----
-
-## Tính năng
-
-### Tab Player
-
-#### Movement
-| Tính năng | Mô tả |
-|---|---|
-| Speed Boost | Tăng tốc độ di chuyển (16–500) |
-| Infinite Jump | Nhảy không giới hạn |
-| Noclip | Xuyên tường, không va chạm |
-| Teleport To Mouse | Nhấn `T` để teleport tới vị trí chuột |
-| Freeze Position | Khóa vị trí nhân vật |
-| Instant Interaction | ProximityPrompt tức thì (HoldDuration = 0) |
-| Auto Pick Up Items | Tự nhặt item trong bán kính (5–50 studs) |
-
-#### Fly
-| Tính năng | Mô tả |
-|---|---|
-| Fly | Bay tự do, điều khiển bằng WASD + Space/Shift |
-| Fly Speed | Tốc độ bay (10–200) |
-| Auto Climb | Tự leo tường |
-| Anti-Wind | Chống bị đẩy bởi gió |
-| Float | Lơ lửng tại chỗ |
-| Spin Player | Xoay nhân vật |
-
-#### Teleport
-- Teleport tới player bất kỳ
-- Lưu & load điểm teleport thủ công
+### ⚙️ Settings & Customization
+- **ThemeManager**: Customize UI colors and save your favorite aesthetics.
+- **SaveManager**: Automatically saves your toggle/slider configurations and auto-loads them the next time you inject.
+- **Dynamic Tooltips**: Every single toggle and slider features descriptive tooltips for a seamless user experience.
 
 ---
 
-### Tab Visual
+## 🚀 Getting Started
 
-#### Modern ESP
-| Tính năng | Mô tả |
-|---|---|
-| Enable ESP | Bật/tắt toàn bộ ESP |
-| Boxes | Khung bao quanh nhân vật |
-| Names | Hiển thị tên người chơi |
-| Distance | Hiển thị khoảng cách |
-| Health Bars | Thanh máu |
-| Tracers | Đường kẻ từ màn hình tới nhân vật |
-| Chams | Highlight nhân vật qua tường |
-| Skeleton | Khung xương |
-| Weapon | Tên vũ khí đang cầm |
-| Team Check | Bỏ qua đồng đội |
+1. Open `Script.lua` and copy the entire source code.
+2. Launch your preferred Roblox executor.
+3. Attach/Inject your executor into Roblox.
+4. Paste the script and Execute!
+5. Use the Right `Shift` key to toggle the menu interface on and off.
 
-#### Lighting
-| Tính năng | Mô tả |
-|---|---|
-| Fullbright | Sáng tối đa, không bóng tối |
-| No Fog | Xóa sương mù |
-| Force Time | Khóa thời gian trong ngày (0–24) |
-| FOV | Điều chỉnh góc nhìn camera (30–120) |
-
----
-
-### Tab Combat
-
-#### Client Pull
-| Tính năng | Mô tả |
-|---|---|
-| Pull Players/Bots | Kéo nhân vật về phía mình (client-side) |
-| Pull Radius | Bán kính tìm mục tiêu (10–1000) |
-| Pull Distance | Khoảng cách giữ mục tiêu (2–15) |
-| Pull X/Y Offset | Điều chỉnh vị trí mục tiêu |
-| Max Pull Targets | Số mục tiêu tối đa (1–5) |
-
-#### Aimbot
-| Tính năng | Mô tả |
-|---|---|
-| Enable Aimbot | Bật aimbot |
-| Require Right Mouse Hold | Chỉ aim khi giữ chuột phải |
-| Aim FOV | Bán kính FOV aim (25–600) |
-| Smoothness | Độ mượt khi aim (1–100) |
-| Visible Only | Chỉ aim mục tiêu nhìn thấy được |
-| Lock Target | Giữ nguyên mục tiêu cho đến khi invalid |
-| Show FOV Circle | Hiển thị vòng tròn FOV |
-
-#### Weapon
-| Tính năng | Mô tả |
-|---|---|
-| No Spread | Không tản đạn |
-| No Recoil | Không giật súng |
-| Instant Reload | Reload tức thì |
-| Rapid Fire | Bắn liên tục không delay |
-
----
-
-### Tab Misc
-
-| Tính năng | Mô tả |
-|---|---|
-| Anti-AFK | Chống bị kick do AFK |
-| Spam Chat | Gửi tin nhắn tự động theo chu kỳ |
-| Bang Player | Chạy animation đặc biệt lên player được chọn |
-| Server Hop | Nhảy server |
-
----
-
-### Tab Settings
-
-| Tính năng | Mô tả |
-|---|---|
-| Show Keybinds Menu | Ẩn/hiện danh sách phím tắt trên màn hình |
-| Theme | Tùy chỉnh giao diện màu sắc |
-| Config | Lưu, load, xóa config |
-| Autoload | Đặt config tự động load mỗi lần chạy script |
-
----
-
-## Config & Autoload
-
-Script hỗ trợ lưu trạng thái tất cả toggle/slider để tự động khôi phục lần sau:
-
-1. Bật các tính năng muốn giữ
-2. Vào tab **Settings → Config**
-3. Đặt tên → nhấn **Save**
-4. Nhấn **Set as Autoload**
-
-Từ lần sau, script tự load lại toàn bộ cài đặt khi khởi động.
-
-> Config được lưu tại: `28th6Hub/configs/` trên máy tính.
-
----
-
-## Cấu trúc kỹ thuật
-
-```
-Script
-├── safeLoad()           — Load LinoriaLib an toàn với pcall + kiểm tra HTML lỗi
-├── State {}             — Bảng chứa toàn bộ biến trạng thái (tránh vượt giới hạn 200 local)
-├── CombatState {}       — Biến trạng thái riêng cho combat/aimbot
-├── ESP_Cache {}         — Cache Drawing objects theo character
-├── Connections {}       — Track RunService connections để cleanup
-└── fullCleanup()        — Dọn toàn bộ Drawing + connections khi unload
-```
-
-**Giới hạn local variables:** Lua giới hạn 200 locals/chunk. Script dùng `State` và `CombatState` table để gộp biến, hiện đang ở **140/200**.
-
----
-
-## Lưu ý
-
-- Script chạy **hoàn toàn client-side** — không ảnh hưởng server
-- Pull Players là client-side pull, chỉ người dùng thấy hiệu ứng
-- Weapon patches (No Spread, Rapid Fire...) chỉ hoạt động với tool có `NumberValue`/`ModuleScript` chứa các giá trị tương ứng
-- Một số game có anti-cheat có thể phát hiện một số tính năng
+## 📝 Technical Notes
+- **Optimization**: This script has been aggressively optimized. Over 2,300 lines of hardcoded debugger bloat were removed and replaced with a dynamic cloud-loader, dropping the file size from ~240KB to ~140KB for instant execution.
+- **Kill Aura Compatibility**: Because every Roblox game is coded differently, you may need to cycle through the 4 Kill Aura methods in the Combat tab to find the one that successfully registers damage in your specific game.
