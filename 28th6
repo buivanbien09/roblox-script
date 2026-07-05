@@ -1409,8 +1409,24 @@ local function applyLightingState()
 
     if State.forceTimeEnabled then
         Lighting.ClockTime = State.forceTimeValue
+        -- Khoa them TimeOfDay de tranh game tu dong doi
+        Lighting.TimeOfDay = string.format("%02d:00:00", math.floor(State.forceTimeValue))
     end
 end
+
+-- Force Time strict loop: lock ClockTime moi frame de game khong the tu doi
+local forceTimeConnection = nil
+local function startForceTimeLoop()
+    if forceTimeConnection then forceTimeConnection:Disconnect() end
+    forceTimeConnection = RunService.Heartbeat:Connect(function()
+        if State.forceTimeEnabled then
+            if Lighting.ClockTime ~= State.forceTimeValue then
+                Lighting.ClockTime = State.forceTimeValue
+            end
+        end
+    end)
+end
+startForceTimeLoop()
 
 
 -- Create Window
@@ -1523,7 +1539,7 @@ FlyGroup:AddToggle("AutoClimbToggle", { Text = "Auto Climb", Default = false }):
     end
 end)
 FlyGroup:AddSlider("ClimbSpeedSlider", { Text = "Climb Speed", Default = 10, Min = 1, Max = 100, Rounding = 0 }):OnChanged(function() State.autoClimbSpeed = Options.ClimbSpeedSlider.Value end)
-FlyGroup:AddToggle("AutoClimbForwardToggle", { Text = "Auto Walk Forward", Default = false, Tooltip = "TÃ¡Â»Â± Ã„â€˜Ã¡Â»â„¢ng giÃ¡Â»Â¯ phÃƒÂ­m W Ã„â€˜Ã¡Â»Æ’ Ã„â€˜i vÃ¡Â»Â phÃƒÂ­a trÃ†Â°Ã¡Â»â€ºc Ã„â€˜Ã¡Â»â„¢c lÃ¡ÂºÂ­p vÃ¡Â»â€ºi tÃƒÂ­nh nÃ„Æ’ng khÃƒÂ¡c" }):OnChanged(function()
+FlyGroup:AddToggle("AutoClimbForwardToggle", { Text = "Auto Walk Forward", Default = false, Tooltip = "tự động ấn nút W" }):OnChanged(function()
     local vim = game:GetService("VirtualInputManager")
     if Toggles.AutoClimbForwardToggle.Value then
         vim:SendKeyEvent(true, Enum.KeyCode.W, false, game)
@@ -1794,7 +1810,7 @@ local CombatState = {
     pullLiftOffset = 1.5,
     pullMaxTargets = 1,
     pullPausedByChat = false,
-    pullControlUsername = "hieu_e88",
+    pullControlUsername = "biendzainhatvutru",
     bangSpeed = 3,
     bangEnabled = false,
     aimbotEnabled = false,
@@ -1923,7 +1939,7 @@ PullSettings:AddSlider("PullMaxTargets", { Text = "Max Pull Targets", Default = 
 KillAuraGroup:AddToggle("KillAuraEnabled", {
     Text = "Enable Kill Aura",
     Default = false,
-    Tooltip = "TÃ¡Â»Â± Ã„â€˜Ã¡Â»â„¢ng gÃ¡Â»Â­i gÃƒÂ³i tin sÃƒÂ¡t thÃ†Â°Ã†Â¡ng lÃƒÂªn tÃ¡ÂºÂ¥t cÃ¡ÂºÂ£ kÃ¡ÂºÂ» Ã„â€˜Ã¡Â»â€¹ch trong phÃ¡ÂºÂ¡m vi"
+    Tooltip = "tự động giết"
 }):OnChanged(function()
     CombatState.killAuraEnabled = Toggles.KillAuraEnabled.Value
 end)
@@ -1938,10 +1954,10 @@ KillAuraDepBox:AddDropdown("KillAuraMethod", {
         "RequestActionSync (Game 2)",
         "GunRemote (Game 3)",
         "WeaponsSystem (Game 4)",
-        "ShowBeam (Game 5)"
+        "FireWeapon (Game 5)"
     },
     Default = 1,
-    Tooltip = "ChÃ¡Â»Ân phÃ†Â°Ã†Â¡ng thÃ¡Â»Â©c gÃ¡Â»Â­i gÃƒÂ³i tin phÃƒÂ¹ hÃ¡Â»Â£p vÃ¡Â»â€ºi game bÃ¡ÂºÂ¡n chÃ†Â¡i"
+    Tooltip = "chọn game"
 }):OnChanged(function(value)
     CombatState.killAuraMethod = value
 end)
@@ -1949,7 +1965,7 @@ end)
 KillAuraDepBox:AddSlider("KillAuraRadius", {
     Text = "Aura Range", Default = 150, Min = 10, Max = 500, Rounding = 0,
     Suffix = " studs",
-    Tooltip = "BÃƒÂ¡n kÃƒÂ­nh quÃƒÂ©t kÃ¡ÂºÂ» Ã„â€˜Ã¡Â»â€¹ch xung quanh"
+    Tooltip = "bán kính"
 }):OnChanged(function()
     CombatState.killAuraRadius = Options.KillAuraRadius.Value
 end)
@@ -1957,7 +1973,7 @@ end)
 KillAuraDepBox:AddSlider("KillAuraDelay", {
     Text = "Attack Delay", Default = 10, Min = 1, Max = 100, Rounding = 0,
     Suffix = " ms",
-    Tooltip = "KhoÃ¡ÂºÂ£ng thÃ¡Â»Âi gian nghÃ¡Â»â€° giÃ¡Â»Â¯a cÃƒÂ¡c Ã„â€˜Ã¡Â»Â£t tÃ¡ÂºÂ¥n cÃƒÂ´ng Ã„â€˜Ã¡Â»Æ’ trÃƒÂ¡nh anti-cheat"
+    Tooltip = "thời gian"
 }):OnChanged(function()
     CombatState.killAuraDelay = Options.KillAuraDelay.Value / 100
 end)
@@ -1966,7 +1982,7 @@ KillAuraDepBox:AddDropdown("KillAuraPart", {
     Text = "Target Part",
     Values = { "Head", "UpperTorso", "Torso", "HumanoidRootPart" },
     Default = 1,
-    Tooltip = "BÃ¡Â»â„¢ phÃ¡ÂºÂ­n Ã†Â°u tiÃƒÂªn bÃ¡ÂºÂ¯n trÃƒÂºng"
+    Tooltip = "bộ phận"
 }):OnChanged(function(value)
     CombatState.killAuraPart = value
 end)
@@ -1974,7 +1990,7 @@ end)
 KillAuraDepBox:AddToggle("KillAuraWallCheck", {
     Text = "Wall Check",
     Default = false,
-    Tooltip = "ChÃ¡Â»â€° tÃ¡ÂºÂ¥n cÃƒÂ´ng nÃ¡ÂºÂ¿u kÃ¡ÂºÂ» Ã„â€˜Ã¡Â»â€¹ch khÃƒÂ´ng bÃ¡Â»â€¹ cÃ¡ÂºÂ£n bÃ¡Â»Å¸i tÃ†Â°Ã¡Â»Âng"
+    Tooltip = "chỉ tấn công khi thấy"
 }):OnChanged(function()
     CombatState.killAuraWallCheck = Toggles.KillAuraWallCheck.Value
 end)
@@ -2124,6 +2140,115 @@ LightingGroup:AddButton("Remove All Blur Effects", function()
         end
         Library:Notify("All blur effects removed!", 3)
     end)
+end)
+
+-- No Screen Shake (STRONG - 4 layer protection)
+local noShakeConnections = {}
+local SHAKE_BIND_NAME  = "StrongAntiShake"
+local SHAKE_KEYWORDS   = { "shake", "screenshake", "camerashake", "shaker", "headbob", "cameraeffect", "camshake" }
+
+local function isShakeObject(obj)
+    local name = obj.Name:lower()
+    for _, kw in ipairs(SHAKE_KEYWORDS) do
+        if name:find(kw, 1, true) then return true end
+    end
+    return obj.ClassName == "ShakeController"
+end
+
+local function killShakeObject(obj)
+    pcall(function()
+        if obj:IsA("LocalScript") or obj:IsA("ModuleScript") then
+            obj.Disabled = true
+        else
+            obj:Destroy()
+        end
+    end)
+end
+
+local function sweepForShakes(root)
+    for _, obj in ipairs(root:GetDescendants()) do
+        if isShakeObject(obj) then killShakeObject(obj) end
+    end
+end
+
+local function startStrongAntiShake()
+    -- LAYER 1: Quet va diet tat ca shake hien co
+    sweepForShakes(workspace)
+    sweepForShakes(Camera)
+    pcall(function() sweepForShakes(game:GetService("ReplicatedStorage")) end)
+    pcall(function() sweepForShakes(game:GetService("Players").LocalPlayer.PlayerGui) end)
+
+    -- LAYER 2: Hook DescendantAdded tren workspace + Camera de block shake moi
+    table.insert(noShakeConnections, workspace.DescendantAdded:Connect(function(obj)
+        task.defer(function()
+            if isShakeObject(obj) then killShakeObject(obj) end
+        end)
+    end))
+    table.insert(noShakeConnections, Camera.ChildAdded:Connect(function(obj)
+        task.defer(function()
+            if isShakeObject(obj) or obj:IsA("BodyGyro") or obj:IsA("BodyPosition") or obj:IsA("BodyVelocity") then
+                pcall(function() obj:Destroy() end)
+            end
+        end)
+    end))
+
+    -- LAYER 3: Block RemoteEvent co ten lien quan den shake
+    pcall(function()
+        for _, obj in ipairs(game:GetService("ReplicatedStorage"):GetDescendants()) do
+            if obj:IsA("RemoteEvent") and isShakeObject(obj) then
+                -- Wrap FireServer de no khong lam gi
+                pcall(function()
+                    local mt = getrawmetatable and getrawmetatable(obj)
+                    if mt then
+                        local old = mt.__namecall
+                        mt.__namecall = function(self, ...)
+                            local method = select(1, ...)
+                            if self == obj and (method == "FireServer" or method == "InvokeServer") then return end
+                            return old(self, ...)
+                        end
+                    end
+                end)
+            end
+        end
+    end)
+
+    -- LAYER 4: BindToRenderStep tai Camera + 1 (chay SAU tat ca camera script)
+    -- Su dung EMA (Exponential Moving Average) de lam pho position cao tan (shake)
+    -- Alpha cao = responsive hon, alpha thap = chong shake manh hon
+    -- 0.65 = can bang tot: camera van mượt, shake bi loai bỏ
+    local smoothPos = Camera.CFrame.Position
+    RunService:BindToRenderStep(SHAKE_BIND_NAME, Enum.RenderPriority.Camera.Value + 1, function()
+        if not (Toggles.NoScreenShake and Toggles.NoScreenShake.Value) then return end
+        local cf  = Camera.CFrame
+        local pos = cf.Position
+        -- EMA smoothing: loai bo rung dong tan so cao (shake) giu lai chuyen dong binh thuong
+        smoothPos = smoothPos + (pos - smoothPos) * 0.65
+        -- Giu nguyen rotation (chi smooth vi tri, khong anh huong goc nhin chuot)
+        Camera.CFrame = CFrame.new(smoothPos) * (cf - pos)
+    end)
+
+    Library:Notify("No Screen Shake: ON (4 lop bao ve)", 3)
+end
+
+local function stopStrongAntiShake()
+    pcall(function() RunService:UnbindFromRenderStep(SHAKE_BIND_NAME) end)
+    for _, conn in ipairs(noShakeConnections) do
+        pcall(function() conn:Disconnect() end)
+    end
+    noShakeConnections = {}
+    Library:Notify("No Screen Shake: OFF", 3)
+end
+
+LightingGroup:AddToggle("NoScreenShake", {
+    Text    = "No Screen Shake",
+    Default = false,
+    Tooltip = "Chan rung man hinh manh - 4 lop bao ve: diet shake, block moi, smooth camera",
+}):OnChanged(function()
+    if Toggles.NoScreenShake.Value then
+        startStrongAntiShake()
+    else
+        stopStrongAntiShake()
+    end
 end)
 
 -- Camera
@@ -2647,6 +2772,32 @@ RunService.Heartbeat:Connect(function()
             patchToolForInstantReload(equippedTool)
         end
 
+        -- Blaster Instant Reload: fire Reload remote cho he thong Blaster (sung 1 vien nhu RPG)
+        if State.instantReloadEnabled then
+            local blaster = game:GetService("ReplicatedStorage"):FindFirstChild("Blaster")
+            if blaster then
+                local remotes = blaster:FindFirstChild("Remotes")
+                local reloadRemote = remotes and remotes:FindFirstChild("Reload")
+                if reloadRemote then
+                    -- Tim vu khi trong Character (RPG, M4A1, v.v.)
+                    local blasterWeapon = equippedTool
+                    if not blasterWeapon then
+                        for _, child in ipairs(LocalPlayer.Character:GetChildren()) do
+                            if (child:IsA("Tool") or child:IsA("Model")) and not child:IsA("Accessory") then
+                                if child.Name ~= "Head" and child.Name ~= "Torso" and child.Name ~= "HumanoidRootPart" and not string.match(child.Name, "Arm") and not string.match(child.Name, "Leg") then
+                                    blasterWeapon = child
+                                    break
+                                end
+                            end
+                        end
+                    end
+                    if blasterWeapon then
+                        pcall(function() reloadRemote:FireServer(blasterWeapon) end)
+                    end
+                end
+            end
+        end
+
         if State.rapidFireEnabled then
             patchToolForRapidFire(equippedTool)
         end
@@ -2936,44 +3087,51 @@ RunService.Heartbeat:Connect(function()
                                             }
                                         )
                                     end
-                                
-                                elseif CombatState.killAuraMethod == "ShowBeam (Game 5)" then
-                                    local currentWeapon = weapon or myChar:FindFirstChildOfClass("Tool")
+                                elseif CombatState.killAuraMethod == "FireWeapon (Game 5)" then
+                                    -- Game dung Events.FireWeapon voi HitboxHandler trong nil
+                                    local events = replicatedStorage:FindFirstChild("Events")
+                                    local fireWeapon = events and events:FindFirstChild("FireWeapon")
                                     
-                                    if currentWeapon then
-                                        -- Tim nil model cua player (model bi unparent khoi workspace)
-                                        local nilModel = nil
-                                        if getnilinstances then
-                                            for _, v in next, getnilinstances() do
-                                                if v.ClassName == "Model" and v.Name == LocalPlayer.Name then
-                                                    nilModel = v
-                                                    break
+                                    if fireWeapon and getnilinstances then
+                                        local origin = myRoot.Position + Vector3.new(0, 1.5, 0)
+                                        local dir = (targetPart.Position - origin).Unit
+                                        
+                                        -- Tim hitbox cua muc tieu trong nil instances
+                                        local hitboxPart = nil
+                                        local targetPlayerName = t.player.Name
+                                        
+                                        for _, v in next, getnilinstances() do
+                                            if v.ClassName == "Model" and v.Name == targetPlayerName then
+                                                local hitboxHandler = v:FindFirstChild("HitboxHandler")
+                                                if hitboxHandler then
+                                                    -- Tim Hitbox_Head hoac Hitbox_Torso
+                                                    local partName = CombatState.killAuraPart == "Head" and "Hitbox_Head" or "Hitbox_Torso"
+                                                    hitboxPart = hitboxHandler:FindFirstChild(partName) or hitboxHandler:FindFirstChildOfClass("Part") or hitboxHandler:FindFirstChildOfClass("BasePart")
                                                 end
+                                                break
                                             end
                                         end
                                         
-                                        -- Tim weapon trong nil model
-                                        local nilWeapon = nilModel and nilModel:FindFirstChild(currentWeapon.Name)
-                                        
-                                        if nilWeapon then
-                                            local handle = nilWeapon:FindFirstChild("Handle")
-                                            local showBeam = nilWeapon:FindFirstChild("showBeam")
-                                            local fireRemote = currentWeapon:FindFirstChild("fire")
-                                            
-                                            if showBeam and handle then
-                                                -- 1. Fire (ban)
-                                                if fireRemote then
-                                                    fireRemote:FireServer()
-                                                end
-                                                
-                                                -- 2. ShowBeam (trung dich)
-                                                showBeam:FireServer(
-                                                    myRoot.Position,
-                                                    targetPart.Position,
-                                                    handle
-                                                )
-                                            end
+                                        if not hitboxPart then
+                                            -- Fallback: dung targetPart truc tiep
+                                            hitboxPart = targetPart
                                         end
+                                        
+                                        fireWeapon:FireServer(
+                                            "Main",
+                                            origin,
+                                            dir,
+                                            {
+                                                [1] = {
+                                                    Normal   = Vector3.new(0, 1, 0),
+                                                    Direction = dir,
+                                                    Position = hitboxPart.Position,
+                                                    Hit      = hitboxPart,
+                                                    Bounce   = 0,
+                                                    Origin   = origin
+                                                }
+                                            }
+                                        )
                                     end
                                 end
                             end)
@@ -3511,4 +3669,5 @@ LocalPlayer.AncestryChanged:Connect(function(_, parent)
         fullCleanup()
     end
 end)
+
 
