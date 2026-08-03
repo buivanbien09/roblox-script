@@ -68,7 +68,7 @@ local State = {
     freezePos = nil,
     clickTeleportConnection = nil,
     promptHoldDurations = {},
-    floatBodyVelocity = nil,
+    floatLinearVelocity = nil,
     freezePositionLockConnection = nil,
     suppressCharacterBugUntil = 0,
     spamChatEnabled = false,
@@ -99,7 +99,14 @@ local State = {
     hitboxExpanderTransparency = 0.5,
     flingAuraEnabled = false,
     flingAuraSpeed = 500,
-    flingBav = nil,
+    flingAngularVelocity = nil,
+    floatLinearVelocity = nil,
+    infiniteAmmoEnabled = false,
+    rocketAutoAimEnabled = false,
+    rocketAutoAimRange = 500,
+    bulletRainEnabled = false,
+    bulletRainRate = 0.2,
+    lastBulletRainTime = 0,
 }
 
 -- Weak table: khi tool bi GC (key la weak), entry tu dong xoa khoi bang
@@ -158,7 +165,7 @@ local ESPSettings = {
 }
 
 -- Utility Functions
-local function getPlayerCharacter(player, nilCharMap)
+local function getPlayerCharacter(player)
     if not player then return nil end
     local char = player.Character
     if char then
@@ -168,10 +175,7 @@ local function getPlayerCharacter(player, nilCharMap)
         end
     end
     -- Fallback cho nil character games (anti-cheat)
-    if nilCharMap then
-        local nilChar = nilCharMap[player.Name]
-        if nilChar then return nilChar end
-    elseif getnilinstances then
+    if getnilinstances then
         for _, v in ipairs(getnilinstances()) do
             if v.ClassName == "Model" and v.Name == player.Name then
                 local hum = v:FindFirstChildOfClass("Humanoid")
@@ -480,6 +484,7 @@ local function restorePatchedTool(tool)
     state.active.NoSpread = false
     state.active.InstantReload = false
     state.active.RapidFire = false
+    state.active.InfiniteAmmo = false
 end
 local function getPatchedToolState(tool)
     if not tool then
@@ -498,7 +503,8 @@ local function getPatchedToolState(tool)
         active = {
             NoSpread = false,
             InstantReload = false,
-            RapidFire = false
+            RapidFire = false,
+            InfiniteAmmo = false
         }
     }
     State.patchedToolStates[tool] = state
@@ -683,6 +689,233 @@ local function patchToolForRapidFire(tool)
             })
         end
     end
+end
+
+local function patchToolForNoSpread(tool)
+    if not tool or not tool:IsA("Tool") then
+        return
+    end
+
+    local state = getPatchedToolState(tool)
+    if not state then
+        return
+    end
+
+    state.active.NoSpread = true
+
+    for _, descendant in ipairs(tool:GetDescendants()) do
+        local lowerName = string.lower(descendant.Name)
+
+        if descendant:IsA("NumberValue") or descendant:IsA("IntValue") then
+            if lowerName:find("spread") or lowerName:find("accuracy") or lowerName:find("recoil") then
+                applyToolPatchValue(state, descendant, "Value", 0)
+            end
+        elseif descendant:IsA("ModuleScript") then
+            patchModuleNumericKeys(state, descendant, {
+                { pattern = "spread", value = 0 },
+                { pattern = "spreadradius", value = 0 },
+                { pattern = "spread_radius", value = 0 },
+                { pattern = "accuracy", value = 0 },
+                { pattern = "recoil", value = 0 },
+                { pattern = "recoilamount", value = 0 },
+                { pattern = "recoil_amount", value = 0 }
+            })
+        end
+    end
+end
+
+local function patchToolForInfiniteAmmo(tool)
+    if not tool or not tool:IsA("Tool") then
+        return
+    end
+
+    local state = getPatchedToolState(tool)
+    if not state then
+        return
+    end
+
+    state.active.InfiniteAmmo = true
+
+    for _, descendant in ipairs(tool:GetDescendants()) do
+        local lowerName = string.lower(descendant.Name)
+
+        if descendant:IsA("NumberValue") or descendant:IsA("IntValue") then
+            if lowerName:find("ammo") or lowerName:find("magazine") or lowerName:find("clip") or lowerName:find("bullet") or lowerName:find("reserve") then
+                applyToolPatchValue(state, descendant, "Value", 9999)
+            end
+        elseif descendant:IsA("ModuleScript") then
+            patchModuleNumericKeys(state, descendant, {
+                { pattern = "ammo", value = 9999 },
+                { pattern = "magazine", value = 9999 },
+                { pattern = "clip", value = 9999 },
+                { pattern = "maxammo", value = 9999 },
+                { pattern = "max_ammo", value = 9999 },
+                { pattern = "reserveammo", value = 9999 },
+                { pattern = "reserve_ammo", value = 9999 },
+                { pattern = "bullets", value = 9999 },
+                { pattern = "maxbullets", value = 9999 }
+            })
+        end
+    end
+end
+
+-- Rocket Auto-Aim / Homing Missiles
+local function findNearestTarget()
+    local myRoot = getRootPart()
+    if not myRoot then return nil end
+
+    local nearestTarget = nil
+    local nearestDistance = State.rocketAutoAimRange
+
+    for _, player in ipairs(Players:GetPlayers()) do
+        if player ~= LocalPlayer then
+            local char = player.Character
+            if char then
+                local hum = char:FindFirstChildOfClass("Humanoid")
+                local targetRoot = char:FindFirstChild("HumanoidRootPart")
+                
+                if hum and hum.Health > 0 and targetRoot then
+                    local distance = (myRoot.Position - targetRoot.Position).Magnitude
+                    if distance < nearestDistance then
+                        nearestDistance = distance
+                        nearestTarget = targetRoot
+                    end
+                end
+            end
+        end
+    end
+
+    return nearestTarget
+end
+
+local function updateProjectileHoming()
+    if not State.rocketAutoAimEnabled then return end
+
+    local target = findNearestTarget()
+    if not target then return end
+
+    -- Find all projectiles in workspace and redirect them to target
+    for _, obj in ipairs(Workspace:GetDescendants()) do
+        if obj:IsA("BasePart") then
+            local lowerName = string.lower(obj.Name)
+            -- Detect rocket/missile/projectile parts
+            if lowerName:find("rocket") or lowerName:find("missile") or lowerName:find("projectile") or lowerName:find("bullet") or lowerName:find("explosive") then
+                -- Check if it's moving (it's a projectile)
+                if obj.AssemblyLinearVelocity.Magnitude > 1 then
+                    -- Calculate direction to target
+                    local direction = (target.Position - obj.Position).Unit
+                    local speed = obj.AssemblyLinearVelocity.Magnitude
+                    -- Apply homing velocity
+                    obj.AssemblyLinearVelocity = direction * math.max(speed, 50)
+                end
+            end
+        end
+    end
+end
+
+-- Bullet Rain System (Rocket with explosion effects)
+local function isRocketTool(tool)
+    if not tool or not tool:IsA("Tool") then return false end
+    local lowerName = string.lower(tool.Name)
+    return lowerName:find("rocket") or lowerName:find("rpg") or lowerName:find("missile") or lowerName:find("launcher") or lowerName:find("bazooka")
+end
+
+local function bulletRain()
+    if not State.bulletRainEnabled then return end
+    
+    local now = tick()
+    if now - State.lastBulletRainTime < State.bulletRainRate then return end
+    
+    local myChar = LocalPlayer.Character
+    local myRoot = myChar and myChar:FindFirstChild("HumanoidRootPart")
+    local equippedTool = myChar and myChar:FindFirstChildOfClass("Tool")
+    
+    if not myRoot or not equippedTool then return end
+    if not isRocketTool(equippedTool) then return end
+    
+    -- Find all targets in range
+    local targets = {}
+    for _, player in ipairs(Players:GetPlayers()) do
+        if player ~= LocalPlayer then
+            local char = player.Character
+            if char then
+                local hum = char:FindFirstChildOfClass("Humanoid")
+                local targetRoot = char:FindFirstChild("HumanoidRootPart")
+                
+                if hum and hum.Health > 0 and targetRoot then
+                    local distance = (myRoot.Position - targetRoot.Position).Magnitude
+                    if distance < State.rocketAutoAimRange then
+                        table.insert(targets, {
+                            character = char,
+                            humanoid = hum,
+                            root = targetRoot,
+                            distance = distance
+                        })
+                    end
+                end
+            end
+        end
+    end
+    
+    if #targets == 0 then return end
+    
+    State.lastBulletRainTime = now
+    
+    -- Fire rockets with explosion effects using both WeaponFired and WeaponHit
+    pcall(function()
+        local replicatedStorage = game:GetService("ReplicatedStorage")
+        local weaponsSystem = replicatedStorage:FindFirstChild("WeaponsSystem")
+        
+        if weaponsSystem then
+            local network = weaponsSystem:FindFirstChild("Network")
+            if network then
+                local weaponFired = network:FindFirstChild("WeaponFired")
+                local weaponHit = network:FindFirstChild("WeaponHit")
+                
+                if weaponFired and weaponHit then
+                    for _, target in ipairs(targets) do
+                        local sid = math.random(10, 100)
+                        local dir = (target.root.Position - myRoot.Position).Unit
+                        
+                        -- 1. Fire rocket (creates projectile and flying effect)
+                        local firedArgs = {
+                            [1] = equippedTool,
+                            [2] = {
+                                ["id"] = sid,
+                                ["charge"] = 0,
+                                ["origin"] = myRoot.Position,
+                                ["dir"] = dir
+                            }
+                        }
+                        weaponFired:FireServer(unpack(firedArgs))
+                        
+                        -- 2. Delay for rocket travel time before hit (explosion)
+                        local travelTime = target.distance / 100 -- Rocket speed ~100 studs/sec
+                        task.delay(travelTime, function()
+                            if target.humanoid and target.humanoid.Health > 0 then
+                                local hitArgs = {
+                                    [1] = equippedTool,
+                                    [2] = {
+                                        ["p"] = target.root.Position,
+                                        ["pid"] = 1,
+                                        ["part"] = target.root,
+                                        ["d"] = target.distance,
+                                        ["maxDist"] = target.distance,
+                                        ["h"] = target.humanoid,
+                                        ["m"] = Enum.Material.Plastic,
+                                        ["n"] = Vector3.yAxis,
+                                        ["t"] = 0.1,
+                                        ["sid"] = sid
+                                    }
+                                }
+                                weaponHit:FireServer(unpack(hitArgs))
+                            end
+                        end)
+                    end
+                end
+            end
+        end
+    end)
 end
 
 local function notify(message, duration)
@@ -976,71 +1209,55 @@ local function getAvailableTeamCheckMode()
             name = "Leaderstats / Side",
             priority = 65,
             check = function(p)
-                local function getTeamValue(plr)
-                    local ls = plr:FindFirstChild("leaderstats")
-                    if ls then
-                        for _, v in ipairs(ls:GetChildren()) do
-                            local n = string.lower(v.Name)
-                            if n == "team" or n == "side" or n == "faction" or n == "class" then
-                                if v:IsA("StringValue") or v:IsA("IntValue") or v:IsA("NumberValue") then
-                                    return v.Value
-                                end
-                            end
-                        end
-                    end
-                    for _, name in ipairs({"Side", "Faction", "Class", "Team", "Squad"}) do
-                        local v = plr:FindFirstChild(name)
-                        if v and (v:IsA("StringValue") or v:IsA("IntValue") or v:IsA("ObjectValue")) then
-                            return v.Value
-                        end
-                    end
-                    local char = plr.Character
-                    if char then
-                        for _, name in ipairs({"Side", "Faction", "Class", "Team"}) do
-                            local v = char:FindFirstChild(name)
-                            if v and (v:IsA("StringValue") or v:IsA("IntValue")) then
-                                return v.Value
-                            end
-                        end
-                    end
-                    return nil
-                end
                 return getTeamValue(LocalPlayer) ~= nil and getTeamValue(p) ~= nil
             end,
             same = function(p)
-                local function getTeamValue(plr)
-                    local ls = plr:FindFirstChild("leaderstats")
-                    if ls then
-                        for _, v in ipairs(ls:GetChildren()) do
-                            local n = string.lower(v.Name)
-                            if n == "team" or n == "side" or n == "faction" or n == "class" then
-                                if v:IsA("StringValue") or v:IsA("IntValue") or v:IsA("NumberValue") then
-                                    return v.Value
-                                end
-                            end
-                        end
-                    end
-                    for _, name in ipairs({"Side", "Faction", "Class", "Team", "Squad"}) do
-                        local v = plr:FindFirstChild(name)
-                        if v and (v:IsA("StringValue") or v:IsA("IntValue") or v:IsA("ObjectValue")) then
-                            return v.Value
-                        end
-                    end
-                    local char = plr.Character
-                    if char then
-                        for _, name in ipairs({"Side", "Faction", "Class", "Team"}) do
-                            local v = char:FindFirstChild(name)
-                            if v and (v:IsA("StringValue") or v:IsA("IntValue")) then
-                                return v.Value
-                            end
-                        end
-                    end
-                    return nil
-                end
                 return getTeamValue(LocalPlayer) == getTeamValue(p)
             end
         },
     }
+
+-- Helper function to get team value from player (avoid duplicate code)
+local function getTeamValue(plr)
+    -- Tim trong leaderstats
+    local ls = plr:FindFirstChild("leaderstats")
+    if ls then
+        for _, v in ipairs(ls:GetChildren()) do
+            local n = string.lower(v.Name)
+            if n == "team" or n == "side" or n == "faction" or n == "class" then
+                if v:IsA("StringValue") or v:IsA("IntValue") or v:IsA("NumberValue") then
+                    return v.Value
+                end
+            end
+        end
+    end
+    -- Tim truc tiep trong Player (Side, Faction, ...)
+    for _, name in ipairs({"Side", "Faction", "Class", "Team", "Squad"}) do
+        local v = plr:FindFirstChild(name)
+        if v and (v:IsA("StringValue") or v:IsA("IntValue") or v:IsA("ObjectValue")) then
+            return v.Value
+        end
+    end
+    -- Tim trong Character
+    local char = plr.Character
+    if char then
+        for _, name in ipairs({"Side", "Faction", "Class", "Team"}) do
+            local v = char:FindFirstChild(name)
+            if v and (v:IsA("StringValue") or v:IsA("IntValue")) then
+                return v.Value
+            end
+        end
+    end
+    return nil
+end
+
+-- Helper function to release stuck W key
+local function releaseWKey()
+    local vim = game:GetService("VirtualInputManager")
+    pcall(function()
+        vim:SendKeyEvent(false, Enum.KeyCode.W, false, game)
+    end)
+end
 
     -- Chay qua tat ca method, tim method nao:
     -- 1. Co du lieu hop le (check() = true)
@@ -1220,38 +1437,6 @@ local function isSameTeam(player)
 
     -- Tim trong leaderstats hoac cac folder custom (Side, Faction, Class, ...)
     local function checkLeaderstats()
-        local function getTeamValue(plr)
-            -- Tim trong leaderstats
-            local ls = plr:FindFirstChild("leaderstats")
-            if ls then
-                for _, v in ipairs(ls:GetChildren()) do
-                    local n = string.lower(v.Name)
-                    if n == "team" or n == "side" or n == "faction" or n == "class" then
-                        if v:IsA("StringValue") or v:IsA("IntValue") or v:IsA("NumberValue") then
-                            return v.Value
-                        end
-                    end
-                end
-            end
-            -- Tim truc tiep trong Player (Side, Faction, ...)
-            for _, name in ipairs({"Side", "Faction", "Class", "Team", "Squad"}) do
-                local v = plr:FindFirstChild(name)
-                if v and (v:IsA("StringValue") or v:IsA("IntValue") or v:IsA("ObjectValue")) then
-                    return v.Value
-                end
-            end
-            -- Tim trong Character
-            local char = plr.Character
-            if char then
-                for _, name in ipairs({"Side", "Faction", "Class", "Team"}) do
-                    local v = char:FindFirstChild(name)
-                    if v and (v:IsA("StringValue") or v:IsA("IntValue")) then
-                        return v.Value
-                    end
-                end
-            end
-            return nil
-        end
         local a = getTeamValue(LocalPlayer)
         local b = getTeamValue(player)
         if a ~= nil and b ~= nil then return a == b end
@@ -1450,9 +1635,9 @@ local function resetCharacterMotionControllers()
     State.freezeEnabled = false
     State.freezePos = nil
 
-    if State.floatBodyVelocity then
-        State.floatBodyVelocity:Destroy()
-        State.floatBodyVelocity = nil
+    if State.floatLinearVelocity then
+        State.floatLinearVelocity:Destroy()
+        State.floatLinearVelocity = nil
     end
 
     local character = LocalPlayer.Character
@@ -1471,7 +1656,7 @@ local function resetCharacterMotionControllers()
             if part:IsA("BasePart") then
                 part.AssemblyLinearVelocity = Vector3.zero
                 part.AssemblyAngularVelocity = Vector3.zero
-            elseif part:IsA("BodyVelocity") or part:IsA("BodyGyro") then
+            elseif part:IsA("BodyVelocity") or part:IsA("BodyGyro") or part:IsA("LinearVelocity") then
                 if part.Name == "FloatForce" or part.Name == "AutoClimbForce" then
                     part:Destroy()
                 end
@@ -1645,16 +1830,17 @@ Toggles.FlyToggle:AddKeyPicker("FlyKey", { Default = "F", SyncToggleState = true
 FlyGroup:AddSlider("FlySpeedSlider", { Text = "Fly Speed", Default = 50, Min = 10, Max = 200, Rounding = 0 }):OnChanged(function() State.flySpeed = Options.FlySpeedSlider.Value end)
 FlyGroup:AddToggle("FloatToggle", { Text = "Float (Lock Y)", Default = false }):OnChanged(function()
     local root = getRootPart()
-    if State.floatBodyVelocity then
-        State.floatBodyVelocity:Destroy()
-        State.floatBodyVelocity = nil
+    if State.floatLinearVelocity then
+        State.floatLinearVelocity:Destroy()
+        State.floatLinearVelocity = nil
     end
     if Toggles.FloatToggle.Value and root then
-        State.floatBodyVelocity = Instance.new("BodyVelocity")
-        State.floatBodyVelocity.Name = "FloatForce"
-        State.floatBodyVelocity.MaxForce = Vector3.new(0, math.huge, 0)
-        State.floatBodyVelocity.Velocity = Vector3.new(0, 0, 0)
-        State.floatBodyVelocity.Parent = root
+        State.floatLinearVelocity = Instance.new("LinearVelocity")
+        State.floatLinearVelocity.Name = "FloatForce"
+        State.floatLinearVelocity.MaxForce = math.huge
+        State.floatLinearVelocity.VectorVelocity = Vector3.new(0, 0, 0)
+        State.floatLinearVelocity.RelativeTo = Enum.ActuatorRelativeTo.World
+        State.floatLinearVelocity.Parent = root
     end
 end)
 FlyGroup:AddToggle("AutoClimbToggle", { Text = "Auto Climb", Default = false }):OnChanged(function()
@@ -1663,11 +1849,17 @@ FlyGroup:AddToggle("AutoClimbToggle", { Text = "Auto Climb", Default = false }):
     if root then
         if State.autoClimbEnabled then
             if not root:FindFirstChild("AutoClimbForce") then
-                local bf = Instance.new("BodyVelocity")
+                local bf = Instance.new("LinearVelocity")
                 bf.Name = "AutoClimbForce"
-                bf.MaxForce = Vector3.new(0, math.huge, 0)
-                bf.Velocity = Vector3.new(0, State.autoClimbSpeed, 0)
+                bf.MaxForce = math.huge
+                bf.VectorVelocity = Vector3.new(0, State.autoClimbSpeed, 0)
+                bf.RelativeTo = Enum.ActuatorRelativeTo.World
                 bf.Parent = root
+            else
+                local bf = root:FindFirstChild("AutoClimbForce")
+                if bf and bf:IsA("LinearVelocity") then
+                    bf.VectorVelocity = Vector3.new(0, State.autoClimbSpeed, 0)
+                end
             end
         else
             local bf = root:FindFirstChild("AutoClimbForce")
@@ -1675,7 +1867,16 @@ FlyGroup:AddToggle("AutoClimbToggle", { Text = "Auto Climb", Default = false }):
         end
     end
 end)
-FlyGroup:AddSlider("ClimbSpeedSlider", { Text = "Climb Speed", Default = 10, Min = 1, Max = 100, Rounding = 0 }):OnChanged(function() State.autoClimbSpeed = Options.ClimbSpeedSlider.Value end)
+FlyGroup:AddSlider("ClimbSpeedSlider", { Text = "Climb Speed", Default = 10, Min = 1, Max = 100, Rounding = 0 }):OnChanged(function() 
+    State.autoClimbSpeed = Options.ClimbSpeedSlider.Value
+    local root = getRootPart()
+    if root and State.autoClimbEnabled then
+        local bf = root:FindFirstChild("AutoClimbForce")
+        if bf and bf:IsA("LinearVelocity") then
+            bf.VectorVelocity = Vector3.new(0, State.autoClimbSpeed, 0)
+        end
+    end
+end)
 FlyGroup:AddToggle("AutoClimbForwardToggle", { Text = "Auto Walk Forward", Default = false, Tooltip = "tự động ấn nút W" }):OnChanged(function()
     local vim = game:GetService("VirtualInputManager")
     if Toggles.AutoClimbForwardToggle.Value then
@@ -1877,7 +2078,7 @@ SavedPointGroup:AddButton("Refresh List",          function() refreshSavedPointD
 Players.PlayerAdded:Connect(function() task.defer(refreshTeleportPlayerList) end)
 Players.PlayerRemoving:Connect(function(player)
     task.defer(refreshTeleportPlayerList)
-    if player.Character then RemoveESP(player.Character) end
+    -- RemoveESP will be called by ESP system when character is removed
 end)
 task.defer(refreshTeleportPlayerList)
 task.defer(refreshSavedPointDropdown)
@@ -1888,24 +2089,26 @@ RunService.Heartbeat:Connect(function()
         pcall(function()
             local root = getRootPart()
             if not root then return end
-            if not State.floatBodyVelocity or State.floatBodyVelocity.Parent ~= root then
-                if State.floatBodyVelocity then State.floatBodyVelocity:Destroy() end
-                State.floatBodyVelocity = Instance.new("BodyVelocity")
-                State.floatBodyVelocity.Name = "FloatForce"
-                State.floatBodyVelocity.MaxForce = Vector3.new(0, math.huge, 0)
-                State.floatBodyVelocity.Parent = root
+            if not State.floatLinearVelocity or State.floatLinearVelocity.Parent ~= root then
+                if State.floatLinearVelocity then State.floatLinearVelocity:Destroy() end
+                State.floatLinearVelocity = Instance.new("LinearVelocity")
+                State.floatLinearVelocity.Name = "FloatForce"
+                State.floatLinearVelocity.MaxForce = math.huge
+                State.floatLinearVelocity.VectorVelocity = Vector3.new(0, 0, 0)
+                State.floatLinearVelocity.RelativeTo = Enum.ActuatorRelativeTo.World
+                State.floatLinearVelocity.Parent = root
             end
-            State.floatBodyVelocity.Velocity = Vector3.new(0, 0, 0)
+            State.floatLinearVelocity.VectorVelocity = Vector3.new(0, 0, 0)
             root.AssemblyLinearVelocity = Vector3.new(root.AssemblyLinearVelocity.X, 0, root.AssemblyLinearVelocity.Z)
         end)
-    elseif State.floatBodyVelocity then
-        State.floatBodyVelocity:Destroy()
-        State.floatBodyVelocity = nil
+    elseif State.floatLinearVelocity then
+        State.floatLinearVelocity:Destroy()
+        State.floatLinearVelocity = nil
     end
 end)
 
 Workspace.DescendantRemoving:Connect(function(descendant)
-    if descendant == State.floatBodyVelocity then State.floatBodyVelocity = nil end
+    if descendant == State.floatLinearVelocity then State.floatLinearVelocity = nil end
 end)
 
 -- Spin RenderStepped
@@ -1962,9 +2165,6 @@ local CombatState = {
     aimbotShowTargetInfo = true,
     aimbotShowTargetDistance = true,
     killAuraMethod = "WeaponHit (Game 1)",
-    rocketSpamEnabled = false,
-    rocketSpamAmount = 10,
-    rocketSpamTarget = "Mouse Position",
 }
 local bangTargetPlayer = nil
 local bangTargetNames = {}
@@ -2035,25 +2235,20 @@ end)
 WeaponGroup:AddToggle("RapidFire", { Text = "Rapid Fire / Fast Fire", Default = false }):OnChanged(function()
     State.rapidFireEnabled = Toggles.RapidFire.Value
 end)
-WeaponGroup:AddDivider()
-WeaponGroup:AddToggle("RocketSpam", { Text = "Rocket / Grenade Spam", Default = false }):OnChanged(function()
-    CombatState.rocketSpamEnabled = Toggles.RocketSpam.Value
+WeaponGroup:AddToggle("InfiniteAmmo", { Text = "Infinite Ammo", Default = false }):OnChanged(function()
+    State.infiniteAmmoEnabled = Toggles.InfiniteAmmo.Value
 end)
-local RocketSpamDep = WeaponGroup:AddDependencyBox()
-RocketSpamDep:SetupDependencies({ { Toggles.RocketSpam, true } })
-RocketSpamDep:AddSlider("RocketSpamAmount", {
-    Text = "Packets per trigger", Default = 10, Min = 1, Max = 50, Rounding = 0,
-    Tooltip = "Số lượng gói tin gửi cùng lúc"
-}):OnChanged(function()
-    CombatState.rocketSpamAmount = Options.RocketSpamAmount.Value
+WeaponGroup:AddToggle("RocketAutoAim", { Text = "Rocket Auto-Aim (Homing)", Default = false, Tooltip = "Tự động dẫn rocket đến người chơi gần nhất" }):OnChanged(function()
+    State.rocketAutoAimEnabled = Toggles.RocketAutoAim.Value
 end)
-RocketSpamDep:AddDropdown("RocketSpamTarget", {
-    Text = "Spam Target",
-    Values = { "Mouse Position", "Nearest Enemy" },
-    Default = 1,
-    Tooltip = "Mục tiêu xả đạn"
-}):OnChanged(function(value)
-    CombatState.rocketSpamTarget = value
+WeaponGroup:AddSlider("RocketAutoAimRange", { Text = "Rocket Auto-Aim Range", Default = 500, Min = 100, Max = 2000, Rounding = 0 }):OnChanged(function()
+    State.rocketAutoAimRange = Options.RocketAutoAimRange.Value
+end)
+WeaponGroup:AddToggle("BulletRain", { Text = "Bullet Rain (Rocket Exp)", Default = false, Tooltip = "Tự động bắn rocket với hiệu ứng nổ vào tất cả địch" }):OnChanged(function()
+    State.bulletRainEnabled = Toggles.BulletRain.Value
+end)
+WeaponGroup:AddSlider("BulletRainRate", { Text = "Bullet Rain Rate", Default = 0.2, Min = 0.05, Max = 1, Rounding = 2, Tooltip = "Tốc độ bắn rocket (giây)" }):OnChanged(function()
+    State.bulletRainRate = Options.BulletRainRate.Value
 end)
 
 -- Fling / Troll
@@ -2116,8 +2311,7 @@ KillAuraDepBox:AddDropdown("KillAuraMethod", {
         "WeaponsSystem (Game 4)",
         "FireWeapon (Game 5)",
         "Shoot (Game 6)",
-        "Crossbow (Game 7)",
-        "GrenadeLauncher (Game 8)"
+        "Crossbow (Game 7)"
     },
     Default = 1,
     Tooltip = "chọn game"
@@ -2238,7 +2432,7 @@ end
 Players.PlayerAdded:Connect(function()   task.defer(refreshBangPlayerList) end)
 Players.PlayerRemoving:Connect(function(player)
     task.defer(refreshBangPlayerList)
-    if player.Character then RemoveESP(player.Character) end
+    -- RemoveESP will be called by ESP system when character is removed
 end)
 task.defer(refreshBangPlayerList)
 refreshBangPlayerList()
@@ -2350,7 +2544,7 @@ local function startStrongAntiShake()
     end))
     table.insert(noShakeConnections, Camera.ChildAdded:Connect(function(obj)
         task.defer(function()
-            if isShakeObject(obj) or obj:IsA("BodyGyro") or obj:IsA("BodyPosition") or obj:IsA("BodyVelocity") then
+            if isShakeObject(obj) or obj:IsA("BodyGyro") or obj:IsA("BodyPosition") or obj:IsA("BodyVelocity") or obj:IsA("LinearVelocity") then
                 pcall(function() obj:Destroy() end)
             end
         end)
@@ -2520,9 +2714,9 @@ end)
 
 -- Character lifecycle events
 LocalPlayer.CharacterRemoving:Connect(function()
-    if State.floatBodyVelocity then
-        pcall(function() State.floatBodyVelocity:Destroy() end)
-        State.floatBodyVelocity = nil
+    if State.floatLinearVelocity then
+        pcall(function() State.floatLinearVelocity:Destroy() end)
+        State.floatLinearVelocity = nil
     end
     if State.clickTeleportConnection then
         State.clickTeleportConnection:Disconnect()
@@ -2534,6 +2728,7 @@ LocalPlayer.CharacterRemoving:Connect(function()
     end
     State.freezePos = nil
     State.characterCollisionStates = {}
+    releaseWKey()
 end)
 
 LocalPlayer.CharacterAdded:Connect(function(character)
@@ -2883,7 +3078,7 @@ RunService.Heartbeat:Connect(function()
     Camera = Workspace.CurrentCamera or Camera
 
     local character = LocalPlayer.Character
-    if character then
+    if character and State.noclipEnabled then
         applyCharacterFootState(character)
     end
 
@@ -2917,9 +3112,10 @@ RunService.Heartbeat:Connect(function()
         state.active.NoSpread = false
         state.active.InstantReload = false
         state.active.RapidFire = false
+        state.active.InfiniteAmmo = false
 
         local shouldKeepPatched = tool == equippedTool and (
-            State.noSpreadEnabled or State.instantReloadEnabled or State.rapidFireEnabled
+            State.noSpreadEnabled or State.instantReloadEnabled or State.rapidFireEnabled or State.infiniteAmmoEnabled
         )
 
         if not shouldKeepPatched then
@@ -2934,6 +3130,10 @@ RunService.Heartbeat:Connect(function()
 
         if State.instantReloadEnabled then
             patchToolForInstantReload(equippedTool)
+        end
+
+        if State.infiniteAmmoEnabled then
+            patchToolForInfiniteAmmo(equippedTool)
         end
 
         -- Blaster Instant Reload: fire Reload remote cho he thong Blaster (sung 1 vien nhu RPG)
@@ -2966,103 +3166,16 @@ RunService.Heartbeat:Connect(function()
             patchToolForRapidFire(equippedTool)
         end
 
-        -- Rocket/Grenade Spam (Game 7 WeaponsSystem Network)
-        if CombatState.rocketSpamEnabled then
-            local weaponsSystem = replicatedStorage:FindFirstChild("WeaponsSystem")
-            local network = weaponsSystem and weaponsSystem:FindFirstChild("Network")
-            local weaponFired = network and network:FindFirstChild("WeaponFired")
-            local weaponHit = network and network:FindFirstChild("WeaponHit")
-            
-            if weaponFired and weaponHit then
-                -- Chi kich hoat khi giu chuot trai hoac tu dong (phai dang lam vu khi WeaponsSystem nhu GrenadeLauncher, Crossbow, v.v.)
-                local isShooting = UserInputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton1)
-                if isShooting then
-                    task.spawn(function()
-                        local amount = CombatState.rocketSpamAmount or 10
-                        local origin = root.Position
-                        
-                        -- Xac dinh diem trung
-                        local hitPos = Vector3.zero
-                        local hitPart = workspace:FindFirstChild("Terrain") or workspace:FindFirstChildOfClass("Terrain")
-                        local hitHum = nil
-                        local hitMaterial = Enum.Material.Grass
-                        
-                        if CombatState.rocketSpamTarget == "Mouse Position" then
-                            local mouse = LocalPlayer:GetMouse()
-                            hitPos = mouse.Hit.Position
-                        elseif CombatState.rocketSpamTarget == "Nearest Enemy" then
-                            local nearest = nil
-                            local minDist = math.huge
-                            for _, p in ipairs(Players:GetPlayers()) do
-                                if p ~= LocalPlayer and p.Character then
-                                    local pRoot = p.Character:FindFirstChild("HumanoidRootPart")
-                                    local pHum = p.Character:FindFirstChildOfClass("Humanoid")
-                                    if pRoot and pHum and pHum.Health > 0 then
-                                        -- Team check
-                                        local sameTeam = false
-                                        if Toggles.ESPTeamCheck and Toggles.ESPTeamCheck.Value then
-                                            sameTeam = isSameTeam(p)
-                                        end
-                                        if not sameTeam then
-                                            local d = (root.Position - pRoot.Position).Magnitude
-                                            if d < minDist then
-                                                minDist = d
-                                                nearest = pRoot
-                                                hitHum = pHum
-                                            end
-                                        end
-                                    end
-                                end
-                            end
-                            if nearest then
-                                hitPos = nearest.Position
-                                hitPart = nearest
-                            else
-                                -- Fallback to mouse
-                                local mouse = LocalPlayer:GetMouse()
-                                hitPos = mouse.Hit.Position
-                            end
-                        end
-                        
-                        -- Huong ban
-                        local dir = (hitPos - origin).Unit
-                        
-                        -- Xa goi tin
-                        for i = 1, amount do
-                            local sid = math.random(100, 1000)
-                            
-                            -- 1. Fire packet
-                            local firedArgs = {
-                                [1] = equippedTool,
-                                [2] = {
-                                    ["id"] = sid,
-                                    ["charge"] = 0,
-                                    ["origin"] = origin,
-                                    ["dir"] = dir
-                                }
-                            }
-                            pcall(function() weaponFired:FireServer(unpack(firedArgs)) end)
-                            
-                            -- 2. Hit packet (Gay no/sat thuong splash)
-                            local dist = (hitPos - origin).Magnitude
-                            local hitArgs = {
-                                [1] = equippedTool,
-                                [2] = {
-                                    ["p"] = hitPos,
-                                    ["pid"] = 1,
-                                    ["part"] = hitPart,
-                                    ["d"] = dist,
-                                    ["maxDist"] = dist + 1,
-                                    ["h"] = hitHum or hitPart,
-                                    ["m"] = hitMaterial,
-                                    ["n"] = Vector3.yAxis,
-                                    ["t"] = 0.2,
-                                    ["sid"] = sid
-                                }
-                            }
-                            pcall(function() weaponHit:FireServer(unpack(hitArgs)) end)
-                        end
-                    end)
+        -- Infinite Ammo: continuously set ammo values to high number
+        if State.infiniteAmmoEnabled then
+            for _, descendant in ipairs(equippedTool:GetDescendants()) do
+                local lowerName = string.lower(descendant.Name)
+                if descendant:IsA("NumberValue") or descendant:IsA("IntValue") then
+                    if lowerName:find("ammo") or lowerName:find("magazine") or lowerName:find("clip") or lowerName:find("bullet") or lowerName:find("reserve") then
+                        pcall(function()
+                            descendant.Value = 9999
+                        end)
+                    end
                 end
             end
         end
@@ -3144,17 +3257,17 @@ RunService.Heartbeat:Connect(function()
         local oldPos = root.Position
         root.Velocity = Vector3.new(0, 10000, 0)
         
-        -- Cap nhat hoac tao moi BAV
-        if not State.flingBav or State.flingBav.Parent ~= root then
-            if State.flingBav then State.flingBav:Destroy() end
-            State.flingBav = Instance.new("BodyAngularVelocity")
-            State.flingBav.Name = "FlingForce"
-            State.flingBav.AngularVelocity = Vector3.new(0, State.flingAuraSpeed, 0)
-            State.flingBav.MaxTorque = Vector3.new(0, math.huge, 0)
-            State.flingBav.P = math.huge
-            State.flingBav.Parent = root
+        -- Cap nhat hoac tao moi AngularVelocity
+        if not State.flingAngularVelocity or State.flingAngularVelocity.Parent ~= root then
+            if State.flingAngularVelocity then State.flingAngularVelocity:Destroy() end
+            State.flingAngularVelocity = Instance.new("AngularVelocity")
+            State.flingAngularVelocity.Name = "FlingForce"
+            State.flingAngularVelocity.AngularVelocity = Vector3.new(0, State.flingAuraSpeed, 0)
+            State.flingAngularVelocity.MaxTorque = math.huge
+            State.flingAngularVelocity.RelativeTo = Enum.ActuatorRelativeTo.World
+            State.flingAngularVelocity.Parent = root
         else
-            State.flingBav.AngularVelocity = Vector3.new(0, State.flingAuraSpeed, 0)
+            State.flingAngularVelocity.AngularVelocity = Vector3.new(0, State.flingAuraSpeed, 0)
         end
         
         -- Xoay tu do khong va cham rÃƒÂ¡c
@@ -3165,14 +3278,15 @@ RunService.Heartbeat:Connect(function()
         end
         
         -- Tra root ve vi tri cu moi khung hinh tao ao giac tang hinh va dung im
-        RunService.RenderStepped:Wait()
+        -- Wait for next frame (using task.wait instead of RenderStepped:Wait)
+        task.wait()
         if root then
             root.Velocity = Vector3.zero
         end
     else
-        if State.flingBav then
-            State.flingBav:Destroy()
-            State.flingBav = nil
+        if State.flingAngularVelocity then
+            State.flingAngularVelocity:Destroy()
+            State.flingAngularVelocity = nil
         end
     end
 
@@ -3190,26 +3304,10 @@ RunService.Heartbeat:Connect(function()
             if now - State.lastKillAuraAttackTime >= CombatState.killAuraDelay then
                 State.lastKillAuraAttackTime = now
                 
-                -- Build map of nil character models once per cycle to prevent high lag spikes
-                local nilCharMap = {}
-                if getnilinstances then
-                    for _, v in ipairs(getnilinstances()) do
-                        if v.ClassName == "Model" then
-                            local name = v.Name
-                            if Players:FindFirstChild(name) then
-                                local hum = v:FindFirstChildOfClass("Humanoid")
-                                if hum and hum.Health > 0 then
-                                    nilCharMap[name] = v
-                                end
-                            end
-                        end
-                    end
-                end
-                
                 local targets = {}
                 for _, player in ipairs(Players:GetPlayers()) do
                     if player ~= LocalPlayer then
-                        local pChar = getPlayerCharacter(player, nilCharMap)
+                        local pChar = getPlayerCharacter(player)
                         if pChar then
                             -- Check alive (don't use isValidTarget - too strict)
                             local targetRoot = pChar:FindFirstChild("HumanoidRootPart")
@@ -3502,52 +3600,6 @@ RunService.Heartbeat:Connect(function()
                                         }
                                         weaponHit:FireServer(unpack(hitArgs))
                                     end
-                                elseif CombatState.killAuraMethod == "GrenadeLauncher (Game 8)" then
-                                    -- Game 8: WeaponsSystem GrenadeLauncher (Fired + Hit with Splash Explosion VFX)
-                                    local weaponsSystem = replicatedStorage:FindFirstChild("WeaponsSystem")
-                                    local network = weaponsSystem and weaponsSystem:FindFirstChild("Network")
-                                    local weaponFired = network and network:FindFirstChild("WeaponFired")
-                                    local weaponHit = network and network:FindFirstChild("WeaponHit")
-                                    
-                                    local currentWeapon = weapon or myChar:FindFirstChildOfClass("Tool")
-                                    if currentWeapon and weaponFired and weaponHit then
-                                        local victimModel = t.character
-                                        local victimHum = t.humanoid
-                                        local hitInstance = t.character:FindFirstChild(targetPart.Name) or targetPart
-                                        
-                                        local sid = math.random(10, 100)
-                                        local dir = (targetPart.Position - myRoot.Position).Unit
-                                        
-                                        -- 1. Fire Weapon (Tạo loạt đạn/lựu đạn)
-                                        local firedArgs = {
-                                            [1] = currentWeapon,
-                                            [2] = {
-                                                ["id"] = sid,
-                                                ["charge"] = 0,
-                                                ["origin"] = myRoot.Position,
-                                                ["dir"] = dir
-                                            }
-                                        }
-                                        weaponFired:FireServer(unpack(firedArgs))
-                                        
-                                        -- 2. Hit Weapon (Tạo điểm nổ nổ tung kẻ địch và tạo hiệu ứng nổ)
-                                        local hitArgs = {
-                                            [1] = currentWeapon,
-                                            [2] = {
-                                                ["p"] = targetPart.Position,
-                                                ["pid"] = 1,
-                                                ["part"] = hitInstance,
-                                                ["d"] = t.distance,
-                                                ["maxDist"] = t.distance + 1,
-                                                ["h"] = victimHum,
-                                                ["m"] = Enum.Material.Plastic,
-                                                ["n"] = Vector3.yAxis,
-                                                ["t"] = 0.1,
-                                                ["sid"] = sid
-                                            }
-                                        }
-                                        weaponHit:FireServer(unpack(hitArgs))
-                                    end
                                 end
                             end)
                         end
@@ -3555,6 +3607,12 @@ RunService.Heartbeat:Connect(function()
                 end
         end
     end
+    
+    -- Rocket Auto-Aim / Homing
+    updateProjectileHoming()
+    
+    -- Bullet Rain System
+    bulletRain()
 end)
 
 UserInputService.JumpRequest:Connect(function()
@@ -4056,13 +4114,13 @@ local function fullCleanup()
     end
 
     -- Cleanup State instances
-    if State.floatBodyVelocity then
-        pcall(function() State.floatBodyVelocity:Destroy() end)
-        State.floatBodyVelocity = nil
+    if State.floatLinearVelocity then
+        pcall(function() State.floatLinearVelocity:Destroy() end)
+        State.floatLinearVelocity = nil
     end
-    if State.flingBav then
-        pcall(function() State.flingBav:Destroy() end)
-        State.flingBav = nil
+    if State.flingAngularVelocity then
+        pcall(function() State.flingAngularVelocity:Destroy() end)
+        State.flingAngularVelocity = nil
     end
 
     -- Cleanup Drawing objects cho aimbot FOV circle
@@ -4076,6 +4134,9 @@ local function fullCleanup()
             aimbotTargetText:Remove()
         end
     end)
+
+    -- Release stuck W key
+    releaseWKey()
 end
 
 -- Chay cleanup khi player bi kick / teleport
@@ -4084,4 +4145,15 @@ LocalPlayer.AncestryChanged:Connect(function(_, parent)
         fullCleanup()
     end
 end)
+
+-- Chay cleanup khi library bi unload
+if Library.Unload then
+    Library.Unload:Connect(function()
+        fullCleanup()
+    end)
+elseif Library.OnUnload then
+    Library.OnUnload:Connect(function()
+        fullCleanup()
+    end)
+end
 
