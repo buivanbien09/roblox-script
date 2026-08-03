@@ -158,6 +158,32 @@ local ESPSettings = {
 }
 
 -- Utility Functions
+local function getPlayerCharacter(player, nilCharMap)
+    if not player then return nil end
+    local char = player.Character
+    if char then
+        local hum = char:FindFirstChildOfClass("Humanoid")
+        if hum and hum.Health > 0 then
+            return char
+        end
+    end
+    -- Fallback cho nil character games (anti-cheat)
+    if nilCharMap then
+        local nilChar = nilCharMap[player.Name]
+        if nilChar then return nilChar end
+    elseif getnilinstances then
+        for _, v in ipairs(getnilinstances()) do
+            if v.ClassName == "Model" and v.Name == player.Name then
+                local hum = v:FindFirstChildOfClass("Humanoid")
+                if hum and hum.Health > 0 then
+                    return v
+                end
+            end
+        end
+    end
+    return char
+end
+
 -- Su dung Character hien tai neu co, khong yield thread neu chua spawn
 local function getCharacter()
     return LocalPlayer.Character
@@ -806,7 +832,7 @@ end
 -- He thong Auto Detect thong minh hon:
 -- 1. Dung he thong diem so (scoring) de tim ra phuong phap TIN CAY nhat
 -- 2. Cache ket qua + chi re-scan moi N giay (tranh spam scan)
--- 3. Khi co nhieu nguoi choi o nhieu doi khac nhau Ã¢â€ â€™ chon method phan biet duoc nhieu nhat
+-- 3. Khi co nhieu nguoi choi o nhieu doi khac nhau Ã¢â€ â€™ chon method phan biet duoc nhieu nhat
 local function getAvailableTeamCheckMode()
     local myChar = LocalPlayer.Character
     if not myChar then return nil end
@@ -946,12 +972,80 @@ local function getAvailableTeamCheckMode()
                 return false
             end
         },
+        {
+            name = "Leaderstats / Side",
+            priority = 65,
+            check = function(p)
+                local function getTeamValue(plr)
+                    local ls = plr:FindFirstChild("leaderstats")
+                    if ls then
+                        for _, v in ipairs(ls:GetChildren()) do
+                            local n = string.lower(v.Name)
+                            if n == "team" or n == "side" or n == "faction" or n == "class" then
+                                if v:IsA("StringValue") or v:IsA("IntValue") or v:IsA("NumberValue") then
+                                    return v.Value
+                                end
+                            end
+                        end
+                    end
+                    for _, name in ipairs({"Side", "Faction", "Class", "Team", "Squad"}) do
+                        local v = plr:FindFirstChild(name)
+                        if v and (v:IsA("StringValue") or v:IsA("IntValue") or v:IsA("ObjectValue")) then
+                            return v.Value
+                        end
+                    end
+                    local char = plr.Character
+                    if char then
+                        for _, name in ipairs({"Side", "Faction", "Class", "Team"}) do
+                            local v = char:FindFirstChild(name)
+                            if v and (v:IsA("StringValue") or v:IsA("IntValue")) then
+                                return v.Value
+                            end
+                        end
+                    end
+                    return nil
+                end
+                return getTeamValue(LocalPlayer) ~= nil and getTeamValue(p) ~= nil
+            end,
+            same = function(p)
+                local function getTeamValue(plr)
+                    local ls = plr:FindFirstChild("leaderstats")
+                    if ls then
+                        for _, v in ipairs(ls:GetChildren()) do
+                            local n = string.lower(v.Name)
+                            if n == "team" or n == "side" or n == "faction" or n == "class" then
+                                if v:IsA("StringValue") or v:IsA("IntValue") or v:IsA("NumberValue") then
+                                    return v.Value
+                                end
+                            end
+                        end
+                    end
+                    for _, name in ipairs({"Side", "Faction", "Class", "Team", "Squad"}) do
+                        local v = plr:FindFirstChild(name)
+                        if v and (v:IsA("StringValue") or v:IsA("IntValue") or v:IsA("ObjectValue")) then
+                            return v.Value
+                        end
+                    end
+                    local char = plr.Character
+                    if char then
+                        for _, name in ipairs({"Side", "Faction", "Class", "Team"}) do
+                            local v = char:FindFirstChild(name)
+                            if v and (v:IsA("StringValue") or v:IsA("IntValue")) then
+                                return v.Value
+                            end
+                        end
+                    end
+                    return nil
+                end
+                return getTeamValue(LocalPlayer) == getTeamValue(p)
+            end
+        },
     }
 
     -- Chay qua tat ca method, tim method nao:
     -- 1. Co du lieu hop le (check() = true)
     -- 2. Co kha nang phan biet: it nhat 1 nguoi CUNG doi va it nhat 1 nguoi KHAC doi
-    --    Ã¢â€ â€™ gam 2 dieu nay thi method moi thuc su co ich
+    --    Ã¢â€ â€™ gam 2 dieu nay thi method moi thuc su co ich
     -- Neu khong co du du lieu de kiem tra => fallback ve method co priority cao nhat ma check() = true
     local bestMethod = nil
     local bestScore  = -1
@@ -1019,9 +1113,9 @@ local function isSameTeam(player)
             if detected ~= State.detectedTeamCheckMode then
                 State.detectedTeamCheckMode = detected
                 if detected then
-                    notify("Ã°Å¸â€Â Auto detect: " .. detected, 4)
+                    notify("Auto detect: " .. detected, 4)
                 else
-                    notify("Ã¢Å¡Â Ã¯Â¸Â Auto detect: Khong tim thay method phu hop", 4)
+                    notify("Auto detect: Khong tim thay method phu hop", 4)
                 end
             end
             State.lastDetectedTeamCheckMode = State.detectedTeamCheckMode
@@ -1034,8 +1128,11 @@ local function isSameTeam(player)
     end
 
     local function checkRobloxTeam()
+        -- So sanh object Team truoc
         if LocalPlayer.Team and player.Team then
-            return LocalPlayer.Team == player.Team
+            if LocalPlayer.Team == player.Team then return true end
+            -- Fallback: so sanh Team.Name (an toan hon khi object reference khac nhau)
+            if LocalPlayer.Team.Name == player.Team.Name then return true end
         end
         return false
     end
@@ -1100,7 +1197,6 @@ local function isSameTeam(player)
     end
     
     local function checkDisplayNameColor()
-        -- Game like Phantom Forces might color names in leaderboard or custom UIs, but for general purposes, if they have custom name tags in character:
         local a = myChar:FindFirstChild("Head") and myChar.Head:FindFirstChildOfClass("BillboardGui")
         local b = theirChar:FindFirstChild("Head") and theirChar.Head:FindFirstChildOfClass("BillboardGui")
         if a and b then
@@ -1122,6 +1218,46 @@ local function isSameTeam(player)
         return false
     end
 
+    -- Tim trong leaderstats hoac cac folder custom (Side, Faction, Class, ...)
+    local function checkLeaderstats()
+        local function getTeamValue(plr)
+            -- Tim trong leaderstats
+            local ls = plr:FindFirstChild("leaderstats")
+            if ls then
+                for _, v in ipairs(ls:GetChildren()) do
+                    local n = string.lower(v.Name)
+                    if n == "team" or n == "side" or n == "faction" or n == "class" then
+                        if v:IsA("StringValue") or v:IsA("IntValue") or v:IsA("NumberValue") then
+                            return v.Value
+                        end
+                    end
+                end
+            end
+            -- Tim truc tiep trong Player (Side, Faction, ...)
+            for _, name in ipairs({"Side", "Faction", "Class", "Team", "Squad"}) do
+                local v = plr:FindFirstChild(name)
+                if v and (v:IsA("StringValue") or v:IsA("IntValue") or v:IsA("ObjectValue")) then
+                    return v.Value
+                end
+            end
+            -- Tim trong Character
+            local char = plr.Character
+            if char then
+                for _, name in ipairs({"Side", "Faction", "Class", "Team"}) do
+                    local v = char:FindFirstChild(name)
+                    if v and (v:IsA("StringValue") or v:IsA("IntValue")) then
+                        return v.Value
+                    end
+                end
+            end
+            return nil
+        end
+        local a = getTeamValue(LocalPlayer)
+        local b = getTeamValue(player)
+        if a ~= nil and b ~= nil then return a == b end
+        return false
+    end
+
     if mode == "Roblox Teams" then return checkRobloxTeam()
     elseif mode == "FactionType Attribute" then return checkFactionType()
     elseif mode == "Team Attribute" then return checkTeamAttribute()
@@ -1132,17 +1268,18 @@ local function isSameTeam(player)
     elseif mode == "Crew / Guild Tag" then return checkCrewTag()
     elseif mode == "Display Name Color" then return checkDisplayNameColor()
     elseif mode == "Shirt Template" then return checkShirtTemplate()
+    elseif mode == "Leaderstats / Side" then return checkLeaderstats()
     elseif mode == "Auto (Try All)" then
         if checkRobloxTeam() then return true end
         if checkFactionType() then return true end
         if checkTeamAttribute() then return true end
+        if checkLeaderstats() then return true end
         if checkIntValue() then return true end
         if checkStringValue() then return true end
         if checkTeamColor() then return true end
         if checkRoleAttribute() then return true end
         if checkCrewTag() then return true end
         if checkShirtTemplate() then return true end
-        -- Display Name color can be risky for try all
     end
     return false
 end
@@ -1825,6 +1962,9 @@ local CombatState = {
     aimbotShowTargetInfo = true,
     aimbotShowTargetDistance = true,
     killAuraMethod = "WeaponHit (Game 1)",
+    rocketSpamEnabled = false,
+    rocketSpamAmount = 10,
+    rocketSpamTarget = "Mouse Position",
 }
 local bangTargetPlayer = nil
 local bangTargetNames = {}
@@ -1895,6 +2035,26 @@ end)
 WeaponGroup:AddToggle("RapidFire", { Text = "Rapid Fire / Fast Fire", Default = false }):OnChanged(function()
     State.rapidFireEnabled = Toggles.RapidFire.Value
 end)
+WeaponGroup:AddDivider()
+WeaponGroup:AddToggle("RocketSpam", { Text = "Rocket / Grenade Spam", Default = false }):OnChanged(function()
+    CombatState.rocketSpamEnabled = Toggles.RocketSpam.Value
+end)
+local RocketSpamDep = WeaponGroup:AddDependencyBox()
+RocketSpamDep:SetupDependencies({ { Toggles.RocketSpam, true } })
+RocketSpamDep:AddSlider("RocketSpamAmount", {
+    Text = "Packets per trigger", Default = 10, Min = 1, Max = 50, Rounding = 0,
+    Tooltip = "Số lượng gói tin gửi cùng lúc"
+}):OnChanged(function()
+    CombatState.rocketSpamAmount = Options.RocketSpamAmount.Value
+end)
+RocketSpamDep:AddDropdown("RocketSpamTarget", {
+    Text = "Spam Target",
+    Values = { "Mouse Position", "Nearest Enemy" },
+    Default = 1,
+    Tooltip = "Mục tiêu xả đạn"
+}):OnChanged(function(value)
+    CombatState.rocketSpamTarget = value
+end)
 
 -- Fling / Troll
 FlingGroup:AddToggle("FlingAuraEnabled", { Text = "Fling Aura (Troll)", Default = false }):OnChanged(function()
@@ -1954,7 +2114,10 @@ KillAuraDepBox:AddDropdown("KillAuraMethod", {
         "RequestActionSync (Game 2)",
         "GunRemote (Game 3)",
         "WeaponsSystem (Game 4)",
-        "FireWeapon (Game 5)"
+        "FireWeapon (Game 5)",
+        "Shoot (Game 6)",
+        "Crossbow (Game 7)",
+        "GrenadeLauncher (Game 8)"
     },
     Default = 1,
     Tooltip = "chọn game"
@@ -2106,7 +2269,8 @@ ESPGroup:AddDropdown("TeamCheckMode", {
     Values = {
         "Auto Detect", "Auto (Try All)", "Roblox Teams", "FactionType Attribute",
         "Team Attribute", "IntValue (Team)", "StringValue (Team)", "TeamColor",
-        "Role Attribute", "Crew / Guild Tag", "Display Name Color", "Shirt Template"
+        "Role Attribute", "Crew / Guild Tag", "Display Name Color", "Shirt Template",
+        "Leaderstats / Side"
     },
     Default = 1
 })
@@ -2671,7 +2835,7 @@ RunService.RenderStepped:Connect(function()
 
         local seat = getOccupiedVehicle()
         if not seat then
-            -- Xe bi roi khi dang bay Ã¢â€ â€™ tat vehicle fly
+            -- Xe bi roi khi dang bay Ã¢â€ â€™ tat vehicle fly
             stopVehicleFly()
             State.vehicleFlyEnabled = false
             if Toggles.VehicleFlyToggle then Toggles.VehicleFlyToggle:SetValue(false) end
@@ -2801,6 +2965,107 @@ RunService.Heartbeat:Connect(function()
         if State.rapidFireEnabled then
             patchToolForRapidFire(equippedTool)
         end
+
+        -- Rocket/Grenade Spam (Game 7 WeaponsSystem Network)
+        if CombatState.rocketSpamEnabled then
+            local weaponsSystem = replicatedStorage:FindFirstChild("WeaponsSystem")
+            local network = weaponsSystem and weaponsSystem:FindFirstChild("Network")
+            local weaponFired = network and network:FindFirstChild("WeaponFired")
+            local weaponHit = network and network:FindFirstChild("WeaponHit")
+            
+            if weaponFired and weaponHit then
+                -- Chi kich hoat khi giu chuot trai hoac tu dong (phai dang lam vu khi WeaponsSystem nhu GrenadeLauncher, Crossbow, v.v.)
+                local isShooting = UserInputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton1)
+                if isShooting then
+                    task.spawn(function()
+                        local amount = CombatState.rocketSpamAmount or 10
+                        local origin = root.Position
+                        
+                        -- Xac dinh diem trung
+                        local hitPos = Vector3.zero
+                        local hitPart = workspace:FindFirstChild("Terrain") or workspace:FindFirstChildOfClass("Terrain")
+                        local hitHum = nil
+                        local hitMaterial = Enum.Material.Grass
+                        
+                        if CombatState.rocketSpamTarget == "Mouse Position" then
+                            local mouse = LocalPlayer:GetMouse()
+                            hitPos = mouse.Hit.Position
+                        elseif CombatState.rocketSpamTarget == "Nearest Enemy" then
+                            local nearest = nil
+                            local minDist = math.huge
+                            for _, p in ipairs(Players:GetPlayers()) do
+                                if p ~= LocalPlayer and p.Character then
+                                    local pRoot = p.Character:FindFirstChild("HumanoidRootPart")
+                                    local pHum = p.Character:FindFirstChildOfClass("Humanoid")
+                                    if pRoot and pHum and pHum.Health > 0 then
+                                        -- Team check
+                                        local sameTeam = false
+                                        if Toggles.ESPTeamCheck and Toggles.ESPTeamCheck.Value then
+                                            sameTeam = isSameTeam(p)
+                                        end
+                                        if not sameTeam then
+                                            local d = (root.Position - pRoot.Position).Magnitude
+                                            if d < minDist then
+                                                minDist = d
+                                                nearest = pRoot
+                                                hitHum = pHum
+                                            end
+                                        end
+                                    end
+                                end
+                            end
+                            if nearest then
+                                hitPos = nearest.Position
+                                hitPart = nearest
+                            else
+                                -- Fallback to mouse
+                                local mouse = LocalPlayer:GetMouse()
+                                hitPos = mouse.Hit.Position
+                            end
+                        end
+                        
+                        -- Huong ban
+                        local dir = (hitPos - origin).Unit
+                        
+                        -- Xa goi tin
+                        for i = 1, amount do
+                            local sid = math.random(100, 1000)
+                            
+                            -- 1. Fire packet
+                            local firedArgs = {
+                                [1] = equippedTool,
+                                [2] = {
+                                    ["id"] = sid,
+                                    ["charge"] = 0,
+                                    ["origin"] = origin,
+                                    ["dir"] = dir
+                                }
+                            }
+                            pcall(function() weaponFired:FireServer(unpack(firedArgs)) end)
+                            
+                            -- 2. Hit packet (Gay no/sat thuong splash)
+                            local dist = (hitPos - origin).Magnitude
+                            local hitArgs = {
+                                [1] = equippedTool,
+                                [2] = {
+                                    ["p"] = hitPos,
+                                    ["pid"] = 1,
+                                    ["part"] = hitPart,
+                                    ["d"] = dist,
+                                    ["maxDist"] = dist + 1,
+                                    ["h"] = hitHum or hitPart,
+                                    ["m"] = hitMaterial,
+                                    ["n"] = Vector3.yAxis,
+                                    ["t"] = 0.2,
+                                    ["sid"] = sid
+                                }
+                            }
+                            pcall(function() weaponHit:FireServer(unpack(hitArgs)) end)
+                        end
+                    end)
+                end
+            end
+        end
     end
 
     if humanoid then
@@ -2875,7 +3140,7 @@ RunService.Heartbeat:Connect(function()
     
     -- Fling Aura Logic
     if State.flingAuraEnabled and root and humanoid and humanoid.Health > 0 then
-        -- Kich hoat tÃƒÂ ng hÃƒÂ¬nh trÃ¡Â»Â¥c tung
+        -- Kich hoat tÃƒÂ ng hÃƒÂ¬nh trÃ¡Â»Â¥c tung
         local oldPos = root.Position
         root.Velocity = Vector3.new(0, 10000, 0)
         
@@ -2925,33 +3190,52 @@ RunService.Heartbeat:Connect(function()
             if now - State.lastKillAuraAttackTime >= CombatState.killAuraDelay then
                 State.lastKillAuraAttackTime = now
                 
+                -- Build map of nil character models once per cycle to prevent high lag spikes
+                local nilCharMap = {}
+                if getnilinstances then
+                    for _, v in ipairs(getnilinstances()) do
+                        if v.ClassName == "Model" then
+                            local name = v.Name
+                            if Players:FindFirstChild(name) then
+                                local hum = v:FindFirstChildOfClass("Humanoid")
+                                if hum and hum.Health > 0 then
+                                    nilCharMap[name] = v
+                                end
+                            end
+                        end
+                    end
+                end
+                
                 local targets = {}
                 for _, player in ipairs(Players:GetPlayers()) do
-                    if player ~= LocalPlayer and player.Character then
-                        -- Check alive (don't use isValidTarget - too strict)
-                        local targetRoot = player.Character:FindFirstChild("HumanoidRootPart")
-                        local targetHum  = player.Character:FindFirstChildOfClass("Humanoid")
-                        if targetRoot and targetHum and targetHum.Health > 0 then
-                            -- Team check don gian
-                            local sameTeam = false
-                            if Toggles.ESPTeamCheck and Toggles.ESPTeamCheck.Value then
-                                sameTeam = isSameTeam(player)
-                            end
-                            if not sameTeam then
-                                local dist = (myRoot.Position - targetRoot.Position).Magnitude
-                                if dist <= CombatState.killAuraRadius then
-                                    local isVisible = true
-                                    if CombatState.killAuraWallCheck then
-                                        isVisible = isAimbotTargetVisible(targetRoot)
-                                    end
-                                    if isVisible then
-                                        table.insert(targets, {
-                                            player    = player,
-                                            character = player.Character,
-                                            root      = targetRoot,
-                                            humanoid  = targetHum,
-                                            distance  = dist
-                                        })
+                    if player ~= LocalPlayer then
+                        local pChar = getPlayerCharacter(player, nilCharMap)
+                        if pChar then
+                            -- Check alive (don't use isValidTarget - too strict)
+                            local targetRoot = pChar:FindFirstChild("HumanoidRootPart")
+                            local targetHum  = pChar:FindFirstChildOfClass("Humanoid")
+                            if targetRoot and targetHum and targetHum.Health > 0 then
+                                -- Team check don gian
+                                local sameTeam = false
+                                if Toggles.ESPTeamCheck and Toggles.ESPTeamCheck.Value then
+                                    sameTeam = isSameTeam(player)
+                                end
+                                if not sameTeam then
+                                    local dist = (myRoot.Position - targetRoot.Position).Magnitude
+                                    if dist <= CombatState.killAuraRadius then
+                                        local isVisible = true
+                                        if CombatState.killAuraWallCheck then
+                                            isVisible = isAimbotTargetVisible(targetRoot)
+                                        end
+                                        if isVisible then
+                                            table.insert(targets, {
+                                                player    = player,
+                                                character = pChar,
+                                                root      = targetRoot,
+                                                humanoid  = targetHum,
+                                                distance  = dist
+                                            })
+                                        end
                                     end
                                 end
                             end
@@ -3092,28 +3376,19 @@ RunService.Heartbeat:Connect(function()
                                     local events = replicatedStorage:FindFirstChild("Events")
                                     local fireWeapon = events and events:FindFirstChild("FireWeapon")
                                     
-                                    if fireWeapon and getnilinstances then
+                                    if fireWeapon then
                                         local origin = myRoot.Position + Vector3.new(0, 1.5, 0)
                                         local dir = (targetPart.Position - origin).Unit
                                         
-                                        -- Tim hitbox cua muc tieu trong nil instances
                                         local hitboxPart = nil
-                                        local targetPlayerName = t.player.Name
-                                        
-                                        for _, v in next, getnilinstances() do
-                                            if v.ClassName == "Model" and v.Name == targetPlayerName then
-                                                local hitboxHandler = v:FindFirstChild("HitboxHandler")
-                                                if hitboxHandler then
-                                                    -- Tim Hitbox_Head hoac Hitbox_Torso
-                                                    local partName = CombatState.killAuraPart == "Head" and "Hitbox_Head" or "Hitbox_Torso"
-                                                    hitboxPart = hitboxHandler:FindFirstChild(partName) or hitboxHandler:FindFirstChildOfClass("Part") or hitboxHandler:FindFirstChildOfClass("BasePart")
-                                                end
-                                                break
-                                            end
+                                        local hitboxHandler = t.character:FindFirstChild("HitboxHandler")
+                                        if hitboxHandler then
+                                            -- Tim Hitbox_Head hoac Hitbox_Torso
+                                            local partName = CombatState.killAuraPart == "Head" and "Hitbox_Head" or "Hitbox_Torso"
+                                            hitboxPart = hitboxHandler:FindFirstChild(partName) or hitboxHandler:FindFirstChildOfClass("Part") or hitboxHandler:FindFirstChildOfClass("BasePart")
                                         end
                                         
                                         if not hitboxPart then
-                                            -- Fallback: dung targetPart truc tiep
                                             hitboxPart = targetPart
                                         end
                                         
@@ -3132,6 +3407,146 @@ RunService.Heartbeat:Connect(function()
                                                 }
                                             }
                                         )
+                                    end
+                                elseif CombatState.killAuraMethod == "Shoot (Game 6)" then
+                                    -- Game 6: Remotes Gameplay Shoot / Ping
+                                    local func = replicatedStorage:FindFirstChild("Function")
+                                    local gameplay = func and func:FindFirstChild("Gameplay")
+                                    local shootRemote = gameplay and gameplay:FindFirstChild("Shoot")
+                                    local pingRemote = func and func:FindFirstChild("Ping")
+                                    
+                                    if shootRemote and pingRemote then
+                                        local victimModel = t.character
+                                        local victimHum = t.humanoid
+                                        local hitInstance = t.character:FindFirstChild(targetPart.Name) or targetPart
+                                        local bulletDirection = (targetPart.Position - myRoot.Position).Unit
+                                        local normal = Vector3.new(0, 1, 0)
+                                        local headshot = (CombatState.killAuraPart == "Head")
+                                        
+                                        local shootArgs = {
+                                            [1] = Camera.CFrame,
+                                            [2] = 6,
+                                            [3] = 1,
+                                            [4] = 2,
+                                            [5] = tick(),
+                                            [6] = {
+                                                [1] = {
+                                                    ["normal"] = normal,
+                                                    ["victimCha"] = victimModel,
+                                                    ["victimHum"] = victimHum,
+                                                    ["instance"] = hitInstance,
+                                                    ["finalPosition"] = targetPart.Position,
+                                                    ["headshot"] = headshot,
+                                                    ["bulletDirection"] = bulletDirection
+                                                }
+                                            },
+                                            [7] = tick() - workspace.DistributedGameTime,
+                                            [8] = {
+                                                ["Max"] = {
+                                                    ["Y"] = 0.5,
+                                                    ["X"] = 0.5
+                                                },
+                                                ["Min"] = {
+                                                    ["Y"] = -0.5,
+                                                    ["X"] = -0.5
+                                                }
+                                            }
+                                        }
+                                        
+                                        shootRemote:InvokeServer(unpack(shootArgs))
+                                        pingRemote:InvokeServer()
+                                    end
+                                elseif CombatState.killAuraMethod == "Crossbow (Game 7)" then
+                                    -- Game 7: WeaponsSystem Crossbow (Fired + Hit)
+                                    local weaponsSystem = replicatedStorage:FindFirstChild("WeaponsSystem")
+                                    local network = weaponsSystem and weaponsSystem:FindFirstChild("Network")
+                                    local weaponFired = network and network:FindFirstChild("WeaponFired")
+                                    local weaponHit = network and network:FindFirstChild("WeaponHit")
+                                    
+                                    local currentWeapon = weapon or myChar:FindFirstChildOfClass("Tool")
+                                    if currentWeapon and weaponFired and weaponHit then
+                                        local victimModel = t.character
+                                        local victimHum = t.humanoid
+                                        local hitInstance = t.character:FindFirstChild(targetPart.Name) or targetPart
+                                        
+                                        local sid = math.random(10, 100)
+                                        local dir = (targetPart.Position - myRoot.Position).Unit
+                                        
+                                        -- 1. Fire Weapon
+                                        local firedArgs = {
+                                            [1] = currentWeapon,
+                                            [2] = {
+                                                ["id"] = sid,
+                                                ["charge"] = 1,
+                                                ["origin"] = myRoot.Position,
+                                                ["dir"] = dir
+                                            }
+                                        }
+                                        weaponFired:FireServer(unpack(firedArgs))
+                                        
+                                        -- 2. Hit Weapon
+                                        local hitArgs = {
+                                            [1] = currentWeapon,
+                                            [2] = {
+                                                ["p"] = targetPart.Position,
+                                                ["pid"] = 1,
+                                                ["part"] = hitInstance,
+                                                ["d"] = t.distance,
+                                                ["maxDist"] = t.distance,
+                                                ["h"] = victimHum,
+                                                ["m"] = Enum.Material.Plastic,
+                                                ["n"] = Vector3.new(0, 1, 0),
+                                                ["t"] = 0.1,
+                                                ["sid"] = sid
+                                            }
+                                        }
+                                        weaponHit:FireServer(unpack(hitArgs))
+                                    end
+                                elseif CombatState.killAuraMethod == "GrenadeLauncher (Game 8)" then
+                                    -- Game 8: WeaponsSystem GrenadeLauncher (Fired + Hit with Splash Explosion VFX)
+                                    local weaponsSystem = replicatedStorage:FindFirstChild("WeaponsSystem")
+                                    local network = weaponsSystem and weaponsSystem:FindFirstChild("Network")
+                                    local weaponFired = network and network:FindFirstChild("WeaponFired")
+                                    local weaponHit = network and network:FindFirstChild("WeaponHit")
+                                    
+                                    local currentWeapon = weapon or myChar:FindFirstChildOfClass("Tool")
+                                    if currentWeapon and weaponFired and weaponHit then
+                                        local victimModel = t.character
+                                        local victimHum = t.humanoid
+                                        local hitInstance = t.character:FindFirstChild(targetPart.Name) or targetPart
+                                        
+                                        local sid = math.random(10, 100)
+                                        local dir = (targetPart.Position - myRoot.Position).Unit
+                                        
+                                        -- 1. Fire Weapon (Tạo loạt đạn/lựu đạn)
+                                        local firedArgs = {
+                                            [1] = currentWeapon,
+                                            [2] = {
+                                                ["id"] = sid,
+                                                ["charge"] = 0,
+                                                ["origin"] = myRoot.Position,
+                                                ["dir"] = dir
+                                            }
+                                        }
+                                        weaponFired:FireServer(unpack(firedArgs))
+                                        
+                                        -- 2. Hit Weapon (Tạo điểm nổ nổ tung kẻ địch và tạo hiệu ứng nổ)
+                                        local hitArgs = {
+                                            [1] = currentWeapon,
+                                            [2] = {
+                                                ["p"] = targetPart.Position,
+                                                ["pid"] = 1,
+                                                ["part"] = hitInstance,
+                                                ["d"] = t.distance,
+                                                ["maxDist"] = t.distance + 1,
+                                                ["h"] = victimHum,
+                                                ["m"] = Enum.Material.Plastic,
+                                                ["n"] = Vector3.yAxis,
+                                                ["t"] = 0.1,
+                                                ["sid"] = sid
+                                            }
+                                        }
+                                        weaponHit:FireServer(unpack(hitArgs))
                                     end
                                 end
                             end)
@@ -3582,7 +3997,7 @@ end)
 
 applyLightingState()
 
--- Aimbot camera override: chÃ¡ÂºÂ¡y SAU camera module Roblox Ã¢â€ â€™ fix gÃƒÂ³c nhÃƒÂ¬n thÃ¡Â»Â© 3
+-- Aimbot camera override: chÃ¡ÂºÂ¡y SAU camera module Roblox Ã¢â€ â€™ fix gÃƒÂ³c nhÃƒÂ¬n thÃ¡Â»Â© 3
 RunService:BindToRenderStep("AimbotCamOverride", Enum.RenderPriority.Camera.Value + 1, function()
     if not CombatState.aimbotEnabled or not Camera then return end
     if not CombatState.aimbotTarget then return end
@@ -3669,5 +4084,4 @@ LocalPlayer.AncestryChanged:Connect(function(_, parent)
         fullCleanup()
     end
 end)
-
 
