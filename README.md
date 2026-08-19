@@ -1,52 +1,60 @@
-# 28th6 Hub 🚀
+# 28th6 Roblox Hub
+*Author: Bien*
 
-A highly advanced and fully optimized Universal Roblox script built on the beautiful [LinoriaLib](https://github.com/violin-suzutsuki/LinoriaLib) UI framework. This script is designed to be lightweight, lag-free, and compatible with a wide variety of games. It features powerful combat mechanics, deep visual enhancements, and movement exploits.
+Welcome to the **28th6 Hub** - A multi-functional Roblox Script, heavily optimized to bypass Anti-Cheats and provide a buttery-smooth experience on both PC and Mobile devices.
+
+The script interface is built on the [Fluent](https://github.com/dawid-scripts/Fluent) framework, featuring a sleek, modern Dark Mode UI.
 
 ---
 
 ## 🌟 Key Features
 
-### ⚔️ Combat
-- **Aimbot / Silent Aim**: Highly precise aiming with FOV circle, hit chance calculation, distance checks, and wall checks.
-- **Universal Kill Aura**: Automatically attacks targets within a specified radius. Includes **4 distinct network bypass methods** to work on various game architectures:
-  - `WeaponHit` (Game 1)
-  - `RequestActionSync` (Game 2)
-  - `GunRemote` (Game 3)
-  - `WeaponsSystem` (Game 4)
-- **Hitbox Expander**: Enlarges enemy hitboxes (Head, Torso, or Root) and makes them partially transparent, allowing you to hit targets effortlessly without precise aiming.
+### 🏃‍♂️ Player Tab
+- **Speed Boost:** Accelerate your walk speed (bypasses default speed limits).
+- **NoClip (Physics Bypass):** Walk through walls without getting stuck.
+- **Fly (Stealth Fly):** Zero-gravity stealth flying mode that avoids physics glitches and Anti-Cheat detections.
+- **Float:** Hover mid-air in place.
+- **Spinbot:** Continuously spin to dodge bullets (includes a spin speed slider).
 
-### 👁️ Visuals (ESP)
-- Fully customizable ESP with dynamic, perfectly aligned bounding boxes.
-- **Skeletons (Bones)**, Tracers, Player Names, Health Bars, Distance, and current Weapon display.
-- Advanced settings: Custom colors, Team Check, and Wall Check (Visibility).
+### 👁️ ESP Tab
+- Visual indicators including: **Boxes**, **Names**, **Distance**, **Health**, **Tracers**, and **Chams**.
+- Customizable enemy colors and maximum render distance.
 
-### 🏃 Movement
-- **Speed & Flight**: WalkSpeed multipliers, Infinite Jump, Noclip, and Fly (with Float/Lock-Y options).
-- **Auto-Climb & Auto-Walk**: Automatically climb up walls and automatically walk forward independently of other keypresses.
-- **Vehicle Fly**: Take control of vehicles and fly them through the sky.
-- **Misc Movement**: Spin Player (Spinbot), Freeze Position, and Anti-Wind (ignore map wind physics).
+### ⚔️ Combat Tab
+- **Aimbot:** 
+  - Mouse/Camera locking with adjustable **Smoothness**.
+  - **Headshot Chance (%)** slider (Automatically randomizes aiming at the Head or the Torso to look like a legitimate player).
+  - Visible Only check.
+  - On-screen FOV Circle and Target Info overlay.
+- **Kill Aura:**
+  - Massive destruction radius up to **1000 Studs**.
+  - God-speed attack delay (Minimum **0.001s**).
+  - Smart **Headshot Chance (%)** mechanism.
+  - 8 different Remote methods built-in to support dozens of different games.
+  - **Auto Check:** Strictly ignores dead bodies, deleted characters, and newly spawned players with ForceFields (Spawn Protection) to prevent false flags and bugged attacks.
+- **Weapon Mods:** 
+  - No Spread / No Recoil.
+  - Infinite Ammo.
+  - Fast Fire (Removes shooting delay).
 
-### 🛠️ Misc & Utility
-- **Instant Interact**: Bypass long wait times on Proximity Prompts (press E instantly).
-- **Auto Pickup**: Automatically grabs nearby dropped tools/items and teleports them to your inventory.
-- **Anti-AFK**: Silently prevents Roblox from kicking you after 20 minutes of inactivity.
-- **Integrated Debugger**: Built-in tab to instantly load **SimpleSpy V3** for intercepting and analyzing RemoteEvents/RemoteFunctions.
+### 🚀 Teleport Tab
+- Teleport to specific players.
+- **Click / Tap Teleport:** Click (on PC) or Tap (on Mobile) anywhere on your screen to instantly teleport there.
+- Two movement modes: **Instant** (Snap to location) and **Tween** (Glides through walls using stealth physics without getting bounced back).
 
-### ⚙️ Settings & Customization
-- **ThemeManager**: Customize UI colors and save your favorite aesthetics.
-- **SaveManager**: Automatically saves your toggle/slider configurations and auto-loads them the next time you inject.
-- **Dynamic Tooltips**: Every single toggle and slider features descriptive tooltips for a seamless user experience.
+### 🛠️ Misc Tab
+- Rejoin Server / Server Hop (Automatically finds and transfers you to an underpopulated server).
+- **Anti AFK:** Simulates input and aggressively disables native Roblox idle kick connections. Leave your game running 24/7 without disconnecting.
+- **Force Time of Day:** Locks the in-game time. Uses a Multi-layered Interceptor (`RenderStepped` + `Heartbeat` + `Property Signal`) making it completely unbreakable by any server-sided Admin scripts.
+- **Troll Tools (Bang / Jerk Off):** Custom troll animations that perfectly support both R6 and R15 rigs.
 
 ---
 
-## 🚀 Getting Started
+## 📱 Compatibility
+This script is fully optimized for **PC Executors** and provides top-tier support for the **Mobile Ecosystem (Delta, Codex, Arceus X, etc.)**:
+- The Click Teleport feature integrates touchscreen Raycasting specifically for Tap-to-Teleport functionality.
+- Render loops (`RenderStepped`, `Heartbeat`) are highly optimized to minimize RAM usage and prevent frame drops on mobile devices.
 
-1. Open `Script.lua` and copy the entire source code.
-2. Launch your preferred Roblox executor.
-3. Attach/Inject your executor into Roblox.
-4. Paste the script and Execute!
-5. Use the Right `Shift` key to toggle the menu interface on and off.
-
-## 📝 Technical Notes
-- **Optimization**: This script has been aggressively optimized. Over 2,300 lines of hardcoded debugger bloat were removed and replaced with a dynamic cloud-loader, dropping the file size from ~240KB to ~140KB for instant execution.
-- **Kill Aura Compatibility**: Because every Roblox game is coded differently, you may need to cycle through the 4 Kill Aura methods in the Combat tab to find the one that successfully registers damage in your specific game.
+## 💡 Notes
+- Only enable features as you need them to prevent unnecessary lag on lower-end devices.
+- Some Kill Aura methods are game-specific. If your aura isn't doing damage, try switching the Method in the dropdown menu.
