@@ -2,9 +2,12 @@ local Fluent = loadstring(game:HttpGet("https://github.com/dawid-scripts/Fluent/
 local SaveManager = loadstring(game:HttpGet("https://raw.githubusercontent.com/dawid-scripts/Fluent/master/Addons/SaveManager.lua"))()
 local InterfaceManager = loadstring(game:HttpGet("https://raw.githubusercontent.com/dawid-scripts/Fluent/master/Addons/InterfaceManager.lua"))()
 
+local originalNotify = Fluent.Notify
+Fluent.Notify = function() end
+
 local Window = Fluent:CreateWindow({
     Title = "28th6",
-    SubTitle = "Author Biên",
+    SubTitle = "Author Bien",
     TabWidth = 160,
     Size = UDim2.fromOffset(580, 460),
     Acrylic = true,
@@ -286,15 +289,25 @@ do
         Health    = true,
         Tracers   = true,
         Chams     = true,
+        Counter   = true,
         Skeleton  = false,
         Weapon    = false,
         TeamCheck = false,
         TeamCheckMode = "Auto Detect",
-        EnemyColor = Color3.fromRGB(255, 50, 50),
+        EnemyColor = Color3.fromRGB(255, 255, 255),
         MaxDist   = 1000,
     }
 
     local ESP_Cache  = {}
+    
+    local espCounterText = Drawing.new("Text")
+    espCounterText.Color = Color3.new(1, 1, 1)
+    espCounterText.Size = 36
+    espCounterText.Center = true
+    espCounterText.Outline = true
+    espCounterText.Visible = false
+    espCounterText.ZIndex = 5
+
     local TeamCheckState = {
         detectedTeamCheckMode = nil,
         lastDetectedTeamCheckMode = nil,
@@ -837,6 +850,11 @@ do
             end
         end
 
+        local visibleCount = 0
+        if Camera then
+            espCounterText.Position = Vector2.new(Camera.ViewportSize.X / 2, 50)
+        end
+
         for char, esp in pairs(ESP_Cache) do
             if char:IsA("Model") and char ~= LocalPlayer.Character then
                 local hum = char:FindFirstChildOfClass("Humanoid")
@@ -856,6 +874,7 @@ do
                     local shouldShow = S.Enabled and isAlive and not isTeammate and inRange
                     
                     if shouldShow then
+                        visibleCount = visibleCount + 1
                         local rootPos, onScreen = Camera:WorldToViewportPoint(root.Position)
                         local headPartPos = head and head.Position or (root.Position + Vector3.new(0, 1.5, 0))
                         local headPos = Camera:WorldToViewportPoint(headPartPos + Vector3.new(0, 0.5, 0))
@@ -918,8 +937,8 @@ do
                             end
                             
                             if S.Tracers then
-                                esp.Tracer.Color = S.EnemyColor; esp.Tracer.From = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y)
-                                esp.Tracer.To = Vector2.new(rootPos.X, rootPos.Y + height / 2); esp.Tracer.Visible = true
+                                esp.Tracer.Color = S.EnemyColor; esp.Tracer.From = Vector2.new(Camera.ViewportSize.X / 2, 0)
+                                esp.Tracer.To = Vector2.new(rootPos.X, rootPos.Y - height / 2); esp.Tracer.Visible = true
                             else
                                 esp.Tracer.Visible = false
                             end
@@ -959,11 +978,19 @@ do
                 end
             end
         end
+
+        if S.Enabled and S.Counter and visibleCount > 0 then
+            espCounterText.Text = tostring(visibleCount)
+            espCounterText.Visible = true
+        else
+            espCounterText.Visible = false
+        end
     end)
 
     -- ── UI Controls ──────────────────────────────────────────────
 
     Tabs.ESP:AddToggle("ESPMaster",   { Title = "Enable ESP",             Default = true }):OnChanged(function() S.Enabled   = Options.ESPMaster.Value   end)
+    Tabs.ESP:AddToggle("ESPCounter",  { Title = "Show ESP Counter",       Default = true }):OnChanged(function() S.Counter   = Options.ESPCounter.Value  end)
     Tabs.ESP:AddToggle("ESPBoxes",    { Title = "Show Boxes",             Default = true  }):OnChanged(function() S.Boxes     = Options.ESPBoxes.Value    end)
     Tabs.ESP:AddToggle("ESPNames",    { Title = "Show Names",             Default = true  }):OnChanged(function() S.Names     = Options.ESPNames.Value    end)
     Tabs.ESP:AddToggle("ESPDist",     { Title = "Show Distance",          Default = true  }):OnChanged(function() S.Distance  = Options.ESPDist.Value     end)
@@ -990,7 +1017,7 @@ do
         Callback = function(v) S.MaxDist = v end
     })
 
-    Tabs.ESP:AddColorpicker("ESPEnemyColor", { Title = "Enemy Color", Default = Color3.fromRGB(255, 50, 50) }):OnChanged(function()
+    Tabs.ESP:AddColorpicker("ESPEnemyColor", { Title = "Enemy Color", Default = Color3.fromRGB(255, 255, 255) }):OnChanged(function()
         S.EnemyColor = Options.ESPEnemyColor.Value
     end)
 
@@ -1019,7 +1046,7 @@ do
         killAuraEnabled    = false,
         killAuraMethod     = "WeaponHit (Game 1)",
         killAuraRadius     = 150,
-        killAuraDelay      = 0.1,
+        killAuraDelay      = 0.5,
         killAuraPart       = "Head",
         killAuraWallCheck  = false,
         lastKillAuraTime   = 0,
@@ -1493,7 +1520,7 @@ do
     }):OnChanged(function() CS.killAuraRadius = Options.KillAuraRadius.Value end)
 
     KillAuraGroup:AddSlider("KillAuraDelay", {
-        Title = "Attack Delay (s)", Default = 0.05, Min = 0.001, Max = 1, Rounding = 3
+        Title = "Attack Delay (s)", Default = 0.500, Min = 0.001, Max = 1, Rounding = 3
     }):OnChanged(function() CS.killAuraDelay = Options.KillAuraDelay.Value end)
 
     KillAuraGroup:AddSlider("KillAuraHeadRate", {
@@ -2221,6 +2248,7 @@ SaveManager:BuildConfigSection(Tabs.Settings)
 
 Window:SelectTab(1)
 
-Fluent:Notify({ Title = "28th6", Content = "Loaded successfully! ⚡", Duration = 5 })
-
 SaveManager:LoadAutoloadConfig()
+
+Fluent.Notify = originalNotify
+Fluent:Notify({ Title = "28th6 load done", Content = "Ready to use!", Duration = 5 })
