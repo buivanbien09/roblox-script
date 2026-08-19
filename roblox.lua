@@ -3,8 +3,8 @@ local SaveManager = loadstring(game:HttpGet("https://raw.githubusercontent.com/d
 local InterfaceManager = loadstring(game:HttpGet("https://raw.githubusercontent.com/dawid-scripts/Fluent/master/Addons/InterfaceManager.lua"))()
 
 local Window = Fluent:CreateWindow({
-    Title = "Script Hub",
-    SubTitle = "by user",
+    Title = "28th6",
+    SubTitle = "Author Bien",
     TabWidth = 160,
     Size = UDim2.fromOffset(580, 460),
     Acrylic = true,
@@ -13,11 +13,12 @@ local Window = Fluent:CreateWindow({
 })
 
 local Tabs = {
-    Main     = Window:AddTab({ Title = "Main",     Icon = "zap"      }),
-    ESP      = Window:AddTab({ Title = "ESP",      Icon = "eye"      }),
-    Combat   = Window:AddTab({ Title = "Combat",   Icon = "shield"   }),
-    Misc     = Window:AddTab({ Title = "Misc",     Icon = "globe"    }),
-    Settings = Window:AddTab({ Title = "Settings", Icon = "settings" })
+    Main     = Window:AddTab({ Title = "Player",     Icon = ""      }),
+    ESP      = Window:AddTab({ Title = "ESP",      Icon = ""      }),
+    Combat   = Window:AddTab({ Title = "Combat",   Icon = ""   }),
+    Teleport = Window:AddTab({ Title = "Teleport", Icon = ""   }),
+    Misc     = Window:AddTab({ Title = "Misc",     Icon = ""    }),
+    Settings = Window:AddTab({ Title = "Settings", Icon = "" })
 }
 
 local Options = Fluent.Options
@@ -45,30 +46,24 @@ local function getRootPart()
     local c = LocalPlayer.Character
     return c and c:FindFirstChild("HumanoidRootPart")
 end
--- Get a player's character, including nil-instance fallback for anti-cheat games
 local function getPlayerCharacter(player)
     if not player then return nil end
     local char = player.Character
-    if char then
-        local hum = char:FindFirstChildOfClass("Humanoid")
-        if hum and hum.Health > 0 then return char end
+    if char and char:IsDescendantOf(workspace) then
+        return char
     end
-    if getnilinstances then
-        for _, v in ipairs(getnilinstances()) do
-            if v.ClassName == "Model" and v.Name == player.Name then
-                local hum = v:FindFirstChildOfClass("Humanoid")
-                if hum and hum.Health > 0 then return v end
-            end
-        end
+    -- Fallback: Search workspace manually in case player.Character is unset but model exists
+    local fallback = workspace:FindFirstChild(player.Name)
+    if fallback and fallback:IsA("Model") and fallback:FindFirstChildOfClass("Humanoid") then
+        return fallback
     end
-    return char
+    return nil
 end
 
 -- ================================================================
 --  MAIN TAB – Speed Boost, NoClip, Fly
 -- ================================================================
 do
-    local boostConnection = nil
     local noclipConn      = nil
     local flyConn         = nil
     local flyLV, flyAO, flyAttach = nil, nil, nil
@@ -84,40 +79,34 @@ do
 
     Tabs.Main:AddSlider("SpeedValue", {
         Title = "Speed", Default = 50, Min = 0, Max = 500, Rounding = 0,
-        Callback = function(Value)
-            currentSpeed = Value
-            if Options.SpeedBoostToggle and Options.SpeedBoostToggle.Value and currentMode == "WalkSpeed" then
-                local hum = getHumanoid()
-                if hum then hum.WalkSpeed = Value end
+        Callback = function(Value) currentSpeed = Value end
+    })
+
+    RunService.Heartbeat:Connect(function()
+        if not Options.SpeedBoostToggle or not Options.SpeedBoostToggle.Value then return end
+        local root = getRootPart()
+        local hum = getHumanoid()
+        if not root or not hum then return end
+        
+        if currentMode == "WalkSpeed" then
+            hum.WalkSpeed = currentSpeed
+        elseif currentMode == "Velocity" then
+            if hum.MoveDirection.Magnitude > 0 then
+                local v = hum.MoveDirection * currentSpeed
+                root.AssemblyLinearVelocity = Vector3.new(v.X, root.AssemblyLinearVelocity.Y, v.Z)
+            end
+        elseif currentMode == "CFrame" then
+            if hum.MoveDirection.Magnitude > 0 then
+                root.CFrame = root.CFrame + (hum.MoveDirection * (currentSpeed * 0.01))
             end
         end
-    })
+    end)
 
     Tabs.Main:AddToggle("SpeedBoostToggle", {
         Title = "Speed Boost", Default = false
     }):OnChanged(function()
         local enabled = Options.SpeedBoostToggle.Value
-        if boostConnection then boostConnection:Disconnect(); boostConnection = nil end
         if enabled then
-            if currentMode == "WalkSpeed" then
-                local hum = getHumanoid()
-                if hum then hum.WalkSpeed = currentSpeed end
-                boostConnection = LocalPlayer.CharacterAdded:Connect(function(c)
-                    if Options.SpeedBoostToggle.Value then
-                        c:WaitForChild("Humanoid").WalkSpeed = Options.SpeedValue.Value
-                    end
-                end)
-            elseif currentMode == "Velocity" then
-                boostConnection = RunService.Heartbeat:Connect(function()
-                    local root = getRootPart()
-                    if root then root.AssemblyLinearVelocity = root.CFrame.LookVector * Options.SpeedValue.Value end
-                end)
-            elseif currentMode == "CFrame" then
-                boostConnection = RunService.Heartbeat:Connect(function()
-                    local root = getRootPart()
-                    if root then root.CFrame = root.CFrame * CFrame.new(0, 0, -(Options.SpeedValue.Value * 0.05)) end
-                end)
-            end
             Fluent:Notify({ Title = "Speed Boost", Content = "Enabled: " .. currentMode, Duration = 3 })
         else
             local hum = getHumanoid()
@@ -131,70 +120,64 @@ do
     local PhysicsService = game:GetService("PhysicsService")
     local NC_GROUP = "NoClipGroup"; local NC_DEFAULT = "Default"; local ncGroupCreated = false
 
-    local function setupNoClipGroup()
-        if ncGroupCreated then return end
-        pcall(function()
-            PhysicsService:RegisterCollisionGroup(NC_GROUP)
-            PhysicsService:CollisionGroupSetCollidable(NC_GROUP, NC_DEFAULT, false)
-            PhysicsService:CollisionGroupSetCollidable(NC_GROUP, NC_GROUP, true)
-        end); ncGroupCreated = true
-    end
-    local function setCharGroup(char, group)
-        if not char then return end
-        for _, p in ipairs(char:GetDescendants()) do
-            if p:IsA("BasePart") then pcall(function() p.CollisionGroup = group end) end
-        end
-    end
-
     Tabs.Main:AddToggle("NoClipToggle", {
         Title = "No Clip", Default = false
     }):OnChanged(function()
         if Options.NoClipToggle.Value then
-            setupNoClipGroup(); setCharGroup(LocalPlayer.Character, NC_GROUP)
-            noclipConn = LocalPlayer.CharacterAdded:Connect(function(c)
-                if Options.NoClipToggle.Value then task.wait(); setCharGroup(c, NC_GROUP) end
+            if noclipConn then noclipConn:Disconnect() end
+            noclipConn = RunService.Stepped:Connect(function()
+                local char = LocalPlayer.Character
+                if not char then return end
+                for _, p in ipairs(char:GetDescendants()) do
+                    if p:IsA("BasePart") and p.CanCollide then
+                        p.CanCollide = false
+                    end
+                end
             end)
-            Fluent:Notify({ Title = "No Clip", Content = "Enabled!", Duration = 3 })
+            Fluent:Notify({ Title = "No Clip", Content = "Enabled! (Stealth)", Duration = 3 })
         else
             if noclipConn then noclipConn:Disconnect(); noclipConn = nil end
-            setCharGroup(LocalPlayer.Character, NC_DEFAULT)
+            local char = LocalPlayer.Character
+            if char then
+                for _, p in ipairs(char:GetDescendants()) do
+                    if p:IsA("BasePart") then
+                        if p.Name == "HumanoidRootPart" or p.Name == "Head" or p.Name == "Torso" or p.Name == "UpperTorso" or p.Name == "LowerTorso" then
+                            p.CanCollide = true
+                        end
+                    end
+                end
+            end
             Fluent:Notify({ Title = "No Clip", Content = "Disabled.", Duration = 3 })
         end
     end)
+
+    Tabs.Main:AddKeybind("NoClipKeybind", {
+        Title = "No Clip Hotkey",
+        Default = "N",
+        Callback = function()
+            if Options.NoClipToggle then
+                Options.NoClipToggle:SetValue(not Options.NoClipToggle.Value)
+            end
+        end
+    })
 
     -- ────── Fly ──────────────────────────────────────────────────
 
     Tabs.Main:AddSlider("FlySpeed", { Title = "Fly Speed", Default = 50, Min = 5, Max = 300, Rounding = 0, Callback = function(_) end })
 
-    local function startFly()
-        local root = getRootPart(); if not root then return end
-        local hum = getHumanoid(); if hum then hum.PlatformStand = true end
-        flyAttach = Instance.new("Attachment"); flyAttach.Name = "_FlyAtt"; flyAttach.Parent = root
-        flyLV = Instance.new("LinearVelocity"); flyLV.Name = "_FlyLV"; flyLV.Attachment0 = flyAttach
-        flyLV.MaxForce = 1e5; flyLV.VelocityConstraintMode = Enum.VelocityConstraintMode.Vector
-        flyLV.VectorVelocity = Vector3.zero; flyLV.RelativeTo = Enum.ActuatorRelativeTo.World; flyLV.Parent = root
-        flyAO = Instance.new("AlignOrientation"); flyAO.Name = "_FlyAO"; flyAO.Attachment0 = flyAttach
-        flyAO.Mode = Enum.OrientationAlignmentMode.OneAttachment; flyAO.MaxTorque = 1e5
-        flyAO.MaxAngularVelocity = math.huge; flyAO.Responsiveness = 50; flyAO.CFrame = root.CFrame; flyAO.Parent = root
-    end
-    local function stopFly()
-        local hum = getHumanoid(); if hum then hum.PlatformStand = false end
-        for _, n in ipairs({"_FlyAtt","_FlyLV","_FlyAO"}) do
-            local root = getRootPart(); local o = root and root:FindFirstChild(n)
-            if o then o:Destroy() end
-        end
-        flyLV = nil; flyAO = nil; flyAttach = nil
-        if flyConn then flyConn:Disconnect(); flyConn = nil end
-    end
-
     Tabs.Main:AddToggle("FlyToggle", { Title = "Fly", Default = false }):OnChanged(function()
         if Options.FlyToggle.Value then
-            startFly()
-            flyConn = RunService.RenderStepped:Connect(function()
+            if flyConn then flyConn:Disconnect() end
+            flyConn = RunService.RenderStepped:Connect(function(deltaTime)
                 Camera = workspace.CurrentCamera or Camera
-                local root = getRootPart(); if not root then return end
-                local hum2 = getHumanoid()
-                if hum2 then hum2.PlatformStand = true end
+                local root = getRootPart()
+                local hum = getHumanoid()
+                if not root or not hum then return end
+                
+                -- Stealth Fly: Nullify gravity and set position directly via CFrame. No instances created.
+                root.AssemblyLinearVelocity = Vector3.zero
+                hum:ChangeState(Enum.HumanoidStateType.Physics) -- Optional state to prevent weird leg animations
+
                 local dir = Vector3.zero
                 local cf = Camera.CFrame
                 if UserInputService:IsKeyDown(Enum.KeyCode.W) then dir += cf.LookVector end
@@ -203,35 +186,100 @@ do
                 if UserInputService:IsKeyDown(Enum.KeyCode.D) then dir += cf.RightVector end
                 if UserInputService:IsKeyDown(Enum.KeyCode.Space) then dir += Vector3.yAxis end
                 if UserInputService:IsKeyDown(Enum.KeyCode.LeftShift) then dir -= Vector3.yAxis end
-                local speed = Options.FlySpeed.Value
-                local v = dir.Magnitude > 0 and dir.Unit * speed or Vector3.zero
-                local lv = root:FindFirstChild("_FlyLV")
-                local ao = root:FindFirstChild("_FlyAO")
-                if lv then lv.VectorVelocity = v end
-                if ao and dir.Magnitude > 0 then ao.CFrame = CFrame.lookAt(Vector3.zero, dir) end
+
+                if dir.Magnitude > 0 then
+                    root.CFrame = CFrame.new(root.Position + (dir.Unit * Options.FlySpeed.Value * deltaTime), root.Position + (dir.Unit * Options.FlySpeed.Value * deltaTime) + cf.LookVector)
+                else
+                    root.CFrame = CFrame.new(root.Position, root.Position + cf.LookVector)
+                end
             end)
-            Fluent:Notify({ Title = "Fly", Content = "Enabled! (LinearVelocity)", Duration = 3 })
+            Fluent:Notify({ Title = "Fly", Content = "Enabled! (Stealth CFrame)", Duration = 3 })
         else
-            stopFly()
+            if flyConn then flyConn:Disconnect(); flyConn = nil end
             local hum = getHumanoid()
-            if hum then hum.AutoRotate = true; hum:ChangeState(Enum.HumanoidStateType.GettingUp) end
+            if hum then hum:ChangeState(Enum.HumanoidStateType.GettingUp) end
             Fluent:Notify({ Title = "Fly", Content = "Disabled.", Duration = 3 })
+        end
+    end)
+
+    Tabs.Main:AddKeybind("FlyKeybind", {
+        Title = "Fly Hotkey",
+        Default = "F",
+        Callback = function()
+            if Options.FlyToggle then
+                Options.FlyToggle:SetValue(not Options.FlyToggle.Value)
+            end
+        end
+    })
+
+    -- ────── Spinbot ──────────────────────────────────────────────
+    local spinbotEnabled = false
+    local spinbotSpeed = 50
+
+    Tabs.Main:AddToggle("SpinbotEnabled", {
+        Title = "Enable Spinbot", Default = false
+    }):OnChanged(function()
+        spinbotEnabled = Options.SpinbotEnabled.Value
+        if not spinbotEnabled then
+            local myChar = LocalPlayer.Character
+            local myHum = myChar and myChar:FindFirstChildOfClass("Humanoid")
+            if myHum then myHum.AutoRotate = true end
+        end
+    end)
+
+    Tabs.Main:AddSlider("SpinbotSpeed", {
+        Title = "Spin Speed", Default = 50, Min = 1, Max = 100, Rounding = 0
+    }):OnChanged(function() 
+        spinbotSpeed = Options.SpinbotSpeed.Value 
+    end)
+
+    RunService.RenderStepped:Connect(function(deltaTime)
+        if spinbotEnabled then
+            local myChar = LocalPlayer.Character
+            local myRoot = myChar and myChar:FindFirstChild("HumanoidRootPart")
+            local myHum = myChar and myChar:FindFirstChildOfClass("Humanoid")
+            if myRoot and myHum and myHum.Health > 0 then
+                myHum.AutoRotate = false
+                myRoot.CFrame = myRoot.CFrame * CFrame.Angles(0, math.rad(spinbotSpeed * deltaTime * 60), 0)
+            end
+        end
+    end)
+
+    -- ────── Float ────────────────────────────────────────────────
+    local floatEnabled = false
+    local floatConn = nil
+
+    Tabs.Main:AddToggle("FloatToggle", {
+        Title = "Float", Default = false
+    }):OnChanged(function()
+        floatEnabled = Options.FloatToggle.Value
+        if floatEnabled then
+            if not floatConn then
+                floatConn = RunService.Heartbeat:Connect(function()
+                    local root = getRootPart()
+                    if root then
+                        root.AssemblyLinearVelocity = Vector3.new(root.AssemblyLinearVelocity.X, 0, root.AssemblyLinearVelocity.Z)
+                    end
+                end)
+            end
+        else
+            if floatConn then floatConn:Disconnect(); floatConn = nil end
         end
     end)
 
     LocalPlayer.CharacterAdded:Connect(function()
         Options.FlyToggle:SetValue(false)
         Options.NoClipToggle:SetValue(false)
+        Options.FloatToggle:SetValue(false)
     end)
 end
 
 -- ================================================================
---  ESP TAB – Ported from 28th6 Hub (LinoriaLib)
+--  ESP TAB
 -- ================================================================
 do
-    -- ── Settings ─────────────────────────────────────────────────
     local S = {
-        Enabled   = false,
+        Enabled   = true,
         Boxes     = true,
         Names     = true,
         Distance  = true,
@@ -240,362 +288,673 @@ do
         Chams     = true,
         Skeleton  = false,
         Weapon    = false,
-        TeamCheck = true,
+        TeamCheck = false,
+        TeamCheckMode = "Auto Detect",
         EnemyColor = Color3.fromRGB(255, 50, 50),
         MaxDist   = 1000,
     }
 
-    -- ── ESP Cache (char → drawings table) ────────────────────────
     local ESP_Cache  = {}
-    local lastScanT  = 0
+    local TeamCheckState = {
+        detectedTeamCheckMode = nil,
+        lastDetectedTeamCheckMode = nil,
+        lastTeamCheckScanTime = 0,
+        teamCheckScanInterval = 5,
+        lastESPScanTime = 0,
+    }
 
-    -- ── Team check ───────────────────────────────────────────────
+    -- ── Helper: get team value from player ───────────────────────
+    local function getTeamValue(plr)
+        local ls = plr:FindFirstChild("leaderstats")
+        if ls then
+            for _, v in ipairs(ls:GetChildren()) do
+                local n = string.lower(v.Name)
+                if n == "team" or n == "side" or n == "faction" or n == "class" then
+                    if v:IsA("StringValue") or v:IsA("IntValue") or v:IsA("NumberValue") then
+                        return v.Value
+                    end
+                end
+            end
+        end
+        for _, name in ipairs({"Side", "Faction", "Class", "Team", "Squad"}) do
+            local v = plr:FindFirstChild(name)
+            if v and (v:IsA("StringValue") or v:IsA("IntValue") or v:IsA("ObjectValue")) then
+                return v.Value
+            end
+        end
+        local char = plr.Character
+        if char then
+            for _, name in ipairs({"Side", "Faction", "Class", "Team"}) do
+                local v = char:FindFirstChild(name)
+                if v and (v:IsA("StringValue") or v:IsA("IntValue")) then
+                    return v.Value
+                end
+            end
+        end
+        return nil
+    end
+
+    local function getAvailableTeamCheckMode()
+        local myChar = LocalPlayer.Character
+        if not myChar then return nil end
+
+        local otherPlayers = Players:GetPlayers()
+        local enemies = {}
+        for _, p in ipairs(otherPlayers) do
+            if p ~= LocalPlayer and p.Character then
+                table.insert(enemies, p)
+            end
+        end
+        if #enemies == 0 then return nil end
+
+        local methods = {
+            {
+                name = "Roblox Teams",
+                priority = 100,
+                check = function(p) return LocalPlayer.Team ~= nil and p.Team ~= nil end,
+                same = function(p) return LocalPlayer.Team == p.Team end
+            },
+            {
+                name = "TeamColor",
+                priority = 90,
+                check = function(p) return LocalPlayer.TeamColor ~= nil and p.TeamColor ~= nil end,
+                same = function(p) return LocalPlayer.TeamColor == p.TeamColor end
+            },
+            {
+                name = "FactionType Attribute",
+                priority = 85,
+                check = function(p)
+                    local a = myChar:GetAttribute("FactionType")
+                    local b = p.Character and p.Character:GetAttribute("FactionType")
+                    return a ~= nil and b ~= nil
+                end,
+                same = function(p)
+                    local a = myChar:GetAttribute("FactionType")
+                    local b = p.Character and p.Character:GetAttribute("FactionType")
+                    return a == b
+                end
+            },
+            {
+                name = "Team Attribute",
+                priority = 80,
+                check = function(p)
+                    local a = myChar:GetAttribute("Team") or LocalPlayer:GetAttribute("Team")
+                    local b = p.Character and (p.Character:GetAttribute("Team") or p:GetAttribute("Team"))
+                    return a ~= nil and b ~= nil
+                end,
+                same = function(p)
+                    local a = myChar:GetAttribute("Team") or LocalPlayer:GetAttribute("Team")
+                    local b = p.Character and (p.Character:GetAttribute("Team") or p:GetAttribute("Team"))
+                    return a == b
+                end
+            },
+            {
+                name = "Role Attribute",
+                priority = 75,
+                check = function(p)
+                    local a = myChar:GetAttribute("Role") or LocalPlayer:GetAttribute("Role")
+                    local b = p.Character and (p.Character:GetAttribute("Role") or p:GetAttribute("Role"))
+                    return a ~= nil and b ~= nil
+                end,
+                same = function(p)
+                    local a = myChar:GetAttribute("Role") or LocalPlayer:GetAttribute("Role")
+                    local b = p.Character and (p.Character:GetAttribute("Role") or p:GetAttribute("Role"))
+                    return a == b
+                end
+            },
+            {
+                name = "Crew / Guild Tag",
+                priority = 70,
+                check = function(p)
+                    local a = LocalPlayer:GetAttribute("Crew") or LocalPlayer:GetAttribute("Guild")
+                    local b = p:GetAttribute("Crew") or p:GetAttribute("Guild")
+                    return a ~= nil and b ~= nil
+                end,
+                same = function(p)
+                    local a = LocalPlayer:GetAttribute("Crew") or LocalPlayer:GetAttribute("Guild")
+                    local b = p:GetAttribute("Crew") or p:GetAttribute("Guild")
+                    return a == b
+                end
+            },
+            {
+                name = "IntValue (Team)",
+                priority = 60,
+                check = function(p)
+                    local va = myChar:FindFirstChild("Team") or LocalPlayer:FindFirstChild("Team")
+                    local vb = p.Character and (p.Character:FindFirstChild("Team") or p:FindFirstChild("Team"))
+                    return va and va:IsA("IntValue") and vb and vb:IsA("IntValue")
+                end,
+                same = function(p)
+                    local va = myChar:FindFirstChild("Team") or LocalPlayer:FindFirstChild("Team")
+                    local vb = p.Character and (p.Character:FindFirstChild("Team") or p:FindFirstChild("Team"))
+                    if va and vb then return va.Value == vb.Value end
+                    return false
+                end
+            },
+            {
+                name = "StringValue (Team)",
+                priority = 60,
+                check = function(p)
+                    local va = myChar:FindFirstChild("Team") or LocalPlayer:FindFirstChild("Team")
+                    local vb = p.Character and (p.Character:FindFirstChild("Team") or p:FindFirstChild("Team"))
+                    return va and va:IsA("StringValue") and vb and vb:IsA("StringValue") and va.Value ~= ""
+                end,
+                same = function(p)
+                    local va = myChar:FindFirstChild("Team") or LocalPlayer:FindFirstChild("Team")
+                    local vb = p.Character and (p.Character:FindFirstChild("Team") or p:FindFirstChild("Team"))
+                    if va and vb then return va.Value == vb.Value end
+                    return false
+                end
+            },
+            {
+                name = "Shirt Template",
+                priority = 30,
+                check = function(p)
+                    local a = myChar:FindFirstChildOfClass("Shirt")
+                    local b = p.Character and p.Character:FindFirstChildOfClass("Shirt")
+                    return a and b and a.ShirtTemplate ~= "" and b.ShirtTemplate ~= ""
+                end,
+                same = function(p)
+                    local a = myChar:FindFirstChildOfClass("Shirt")
+                    local b = p.Character and p.Character:FindFirstChildOfClass("Shirt")
+                    if a and b then return a.ShirtTemplate == b.ShirtTemplate end
+                    return false
+                end
+            },
+            {
+                name = "Leaderstats / Side",
+                priority = 65,
+                check = function(p)
+                    return getTeamValue(LocalPlayer) ~= nil and getTeamValue(p) ~= nil
+                end,
+                same = function(p)
+                    return getTeamValue(LocalPlayer) == getTeamValue(p)
+                end
+            },
+        }
+
+        local bestMethod = nil
+        local bestScore  = -1
+        for _, m in ipairs(methods) do
+            local validCount   = 0
+            local sameCount    = 0
+            local diffCount    = 0
+            for _, p in ipairs(enemies) do
+                if p.Character then
+                    pcall(function()
+                        if m.check(p) then
+                            validCount = validCount + 1
+                            if m.same(p) then
+                                sameCount = sameCount + 1
+                            else
+                                diffCount = diffCount + 1
+                            end
+                        end
+                    end)
+                end
+            end
+
+            if validCount > 0 then
+                local discriminationBonus = 0
+                if sameCount > 0 and diffCount > 0 then
+                    discriminationBonus = 50
+                elseif diffCount > 0 then
+                    discriminationBonus = 20
+                end
+                local score = m.priority + discriminationBonus
+                if score > bestScore then
+                    bestScore  = score
+                    bestMethod = m.name
+                end
+            end
+        end
+        return bestMethod
+    end
+
     local function isSameTeam(player)
         if not S.TeamCheck then return false end
-        if LocalPlayer.Team and player.Team then
-            return LocalPlayer.Team == player.Team
+
+        local myChar = LocalPlayer.Character
+        local theirChar = player.Character
+        if not myChar or not theirChar then return false end
+
+        local mode = S.TeamCheckMode
+        if mode == "Auto Detect" then
+            local now = tick()
+            if now - TeamCheckState.lastTeamCheckScanTime > TeamCheckState.teamCheckScanInterval then
+                TeamCheckState.lastTeamCheckScanTime = now
+                local detected = getAvailableTeamCheckMode()
+                if detected ~= TeamCheckState.detectedTeamCheckMode then
+                    TeamCheckState.detectedTeamCheckMode = detected
+                    if detected then
+                        Fluent:Notify({ Title = "Team Check", Content = "Auto detect: " .. detected, Duration = 4 })
+                    else
+                        Fluent:Notify({ Title = "Team Check", Content = "Auto detect: Cannot find suitable method", Duration = 4 })
+                    end
+                end
+                TeamCheckState.lastDetectedTeamCheckMode = TeamCheckState.detectedTeamCheckMode
+            end
+            mode = TeamCheckState.detectedTeamCheckMode or "Auto (Try All)"
+        else
+            TeamCheckState.detectedTeamCheckMode = nil
+            TeamCheckState.lastDetectedTeamCheckMode = nil
+            TeamCheckState.lastTeamCheckScanTime = 0
+        end
+
+        local function checkRobloxTeam()
+            if LocalPlayer.Team and player.Team then
+                if LocalPlayer.Team == player.Team then return true end
+                if LocalPlayer.Team.Name == player.Team.Name then return true end
+            end
+            return false
+        end
+
+        local function checkFactionType()
+            local a = myChar:GetAttribute("FactionType")
+            local b = theirChar:GetAttribute("FactionType")
+            if a ~= nil and b ~= nil then return a == b end
+            return false
+        end
+
+        local function checkTeamAttribute()
+            local a = myChar:GetAttribute("Team") or LocalPlayer:GetAttribute("Team")
+            local b = theirChar:GetAttribute("Team") or player:GetAttribute("Team")
+            if a ~= nil and b ~= nil then return a == b end
+            return false
+        end
+
+        local function checkIntValue()
+            local function getInt(char, plr)
+                local v = char:FindFirstChild("Team") or plr:FindFirstChild("Team")
+                if v and v:IsA("IntValue") then return v.Value end
+                return nil
+            end
+            local a = getInt(myChar, LocalPlayer)
+            local b = getInt(theirChar, player)
+            if a ~= nil and b ~= nil then return a == b end
+            return false
+        end
+
+        local function checkStringValue()
+            local function getStr(char, plr)
+                local v = char:FindFirstChild("Team") or plr:FindFirstChild("Team")
+                if v and v:IsA("StringValue") then return v.Value end
+                return nil
+            end
+            local a = getStr(myChar, LocalPlayer)
+            local b = getStr(theirChar, player)
+            if a ~= nil and b ~= nil and a ~= "" then return a == b end
+            return false
+        end
+
+        local function checkTeamColor()
+            if LocalPlayer.TeamColor and player.TeamColor then
+                return LocalPlayer.TeamColor == player.TeamColor
+            end
+            return false
+        end
+        
+        local function checkRoleAttribute()
+            local a = myChar:GetAttribute("Role") or LocalPlayer:GetAttribute("Role")
+            local b = theirChar:GetAttribute("Role") or player:GetAttribute("Role")
+            if a ~= nil and b ~= nil then return a == b end
+            return false
+        end
+        
+        local function checkCrewTag()
+            local a = LocalPlayer:GetAttribute("Crew") or LocalPlayer:GetAttribute("Guild")
+            local b = player:GetAttribute("Crew") or player:GetAttribute("Guild")
+            if a ~= nil and b ~= nil then return a == b end
+            return false
+        end
+        
+        local function checkDisplayNameColor()
+            local a = myChar:FindFirstChild("Head") and myChar.Head:FindFirstChildOfClass("BillboardGui")
+            local b = theirChar:FindFirstChild("Head") and theirChar.Head:FindFirstChildOfClass("BillboardGui")
+            if a and b then
+                local tL_A = a:FindFirstChildOfClass("TextLabel", true)
+                local tL_B = b:FindFirstChildOfClass("TextLabel", true)
+                if tL_A and tL_B then
+                    return tL_A.TextColor3 == tL_B.TextColor3
+                end
+            end
+            return false
+        end
+        
+        local function checkShirtTemplate()
+            local a = myChar:FindFirstChildOfClass("Shirt")
+            local b = theirChar:FindFirstChildOfClass("Shirt")
+            if a and b and a.ShirtTemplate ~= "" and b.ShirtTemplate ~= "" then
+                return a.ShirtTemplate == b.ShirtTemplate
+            end
+            return false
+        end
+
+        local function checkLeaderstats()
+            local a = getTeamValue(LocalPlayer)
+            local b = getTeamValue(player)
+            if a ~= nil and b ~= nil then return a == b end
+            return false
+        end
+
+        if mode == "Roblox Teams" then return checkRobloxTeam()
+        elseif mode == "FactionType Attribute" then return checkFactionType()
+        elseif mode == "Team Attribute" then return checkTeamAttribute()
+        elseif mode == "IntValue (Team)" then return checkIntValue()
+        elseif mode == "StringValue (Team)" then return checkStringValue()
+        elseif mode == "TeamColor" then return checkTeamColor()
+        elseif mode == "Role Attribute" then return checkRoleAttribute()
+        elseif mode == "Crew / Guild Tag" then return checkCrewTag()
+        elseif mode == "Display Name Color" then return checkDisplayNameColor()
+        elseif mode == "Shirt Template" then return checkShirtTemplate()
+        elseif mode == "Leaderstats / Side" then return checkLeaderstats()
+        elseif mode == "Auto (Try All)" then
+            if checkRobloxTeam() then return true end
+            if checkFactionType() then return true end
+            if checkTeamAttribute() then return true end
+            if checkLeaderstats() then return true end
+            if checkIntValue() then return true end
+            if checkStringValue() then return true end
+            if checkTeamColor() then return true end
+            if checkRoleAttribute() then return true end
+            if checkCrewTag() then return true end
+            if checkShirtTemplate() then return true end
         end
         return false
     end
 
-    -- ── Skeleton helper ──────────────────────────────────────────
-    local function newSkelLine()
-        local ln = Drawing.new("Line")
-        ln.Color = S.EnemyColor; ln.Thickness = 1.5
-        ln.Visible = false; ln.ZIndex = 2
-        return ln
+    local function createSkeletonLine()
+        local line = Drawing.new("Line")
+        line.Color = S.EnemyColor
+        line.Thickness = 1.5
+        line.Visible = false
+        line.ZIndex = 2
+        return line
     end
 
-    local function skelPoint(char, partName)
+    local function getSkeletonPoint(char, partName)
         local part = char and char:FindFirstChild(partName)
         if not part or not part:IsA("BasePart") then return nil end
-        local p, onScreen = Camera:WorldToViewportPoint(part.Position)
-        if not onScreen or p.Z <= 0 then return nil end
-        return Vector2.new(p.X, p.Y)
+        local position, onScreen = Camera:WorldToViewportPoint(part.Position)
+        if not onScreen then return nil end
+        return Vector2.new(position.X, position.Y)
     end
 
-    local function setSkelLine(ln, from, to)
-        if ln and from and to then ln.From = from; ln.To = to; ln.Visible = true
-        elseif ln then ln.Visible = false end
+    local function setSkeletonLine(line, fromPoint, toPoint)
+        if line and fromPoint and toPoint then
+            line.From = fromPoint; line.To = toPoint; line.Visible = true
+        elseif line then
+            line.Visible = false
+        end
     end
 
-    local function hideSkelLines(skel)
-        if not skel then return end
-        for _, ln in pairs(skel) do if ln then ln.Visible = false end end
+    local function hideSkeletonLines(skeletonLines)
+        if not skeletonLines then return end
+        for _, line in pairs(skeletonLines) do
+            if line then line.Visible = false end
+        end
     end
 
-    local function updateSkeleton(char, esp)
-        if not esp or not esp.Skel then return end
-        if not S.Skeleton then hideSkelLines(esp.Skel); return end
+    local function getCharacterWeaponName(char)
+        if not char then return nil end
+        local tool = char:FindFirstChildOfClass("Tool")
+        if tool and tool.Name and tool.Name ~= "" then return tool.Name end
+        return nil
+    end
 
-        local myRoot = getRootPart()
-        local tRoot  = char and char:FindFirstChild("HumanoidRootPart")
-        if myRoot and tRoot and (myRoot.Position - tRoot.Position).Magnitude > S.MaxDist then
-            hideSkelLines(esp.Skel); return
+    local function updateSkeletonESP(char, esp)
+        if not esp or not esp.SkeletonLines then return end
+        if not S.Skeleton then
+            hideSkeletonLines(esp.SkeletonLines)
+            return
         end
 
-        local head        = skelPoint(char, "Head")
-        local upTorso     = skelPoint(char, "UpperTorso") or skelPoint(char, "Torso")
-        local loTorso     = skelPoint(char, "LowerTorso") or upTorso
-        local lUA         = skelPoint(char, "LeftUpperArm")  or skelPoint(char, "Left Arm")
-        local lLA         = skelPoint(char, "LeftLowerArm")
-        local lH          = skelPoint(char, "LeftHand")
-        local rUA         = skelPoint(char, "RightUpperArm") or skelPoint(char, "Right Arm")
-        local rLA         = skelPoint(char, "RightLowerArm")
-        local rH          = skelPoint(char, "RightHand")
-        local lUL         = skelPoint(char, "LeftUpperLeg")  or skelPoint(char, "Left Leg")
-        local lLL         = skelPoint(char, "LeftLowerLeg")
-        local lF          = skelPoint(char, "LeftFoot")
-        local rUL         = skelPoint(char, "RightUpperLeg") or skelPoint(char, "Right Leg")
-        local rLL         = skelPoint(char, "RightLowerLeg")
-        local rF          = skelPoint(char, "RightFoot")
-
-        if not head or not upTorso then hideSkelLines(esp.Skel); return end
-        local neck = Vector2.new((head.X + upTorso.X) / 2, (head.Y + upTorso.Y) / 2)
-
-        local sk = esp.Skel
-        setSkelLine(sk.H2T,  head,   neck)
-        setSkelLine(sk.U2L,  upTorso, loTorso)
-        setSkelLine(sk.LUA,  upTorso, lUA)
-        setSkelLine(sk.LLA,  lUA,    lLA or lH)
-        setSkelLine(sk.LH,   lLA,    lH)
-        setSkelLine(sk.RUA,  upTorso, rUA)
-        setSkelLine(sk.RLA,  rUA,    rLA or rH)
-        setSkelLine(sk.RH,   rLA,    rH)
-        setSkelLine(sk.LULg, loTorso, lUL)
-        setSkelLine(sk.LLL,  lUL,    lLL or lF)
-        setSkelLine(sk.LF,   lLL,    lF)
-        setSkelLine(sk.RULg, loTorso, rUL)
-        setSkelLine(sk.RLL,  rUL,    rLL or rF)
-        setSkelLine(sk.RF,   rLL,    rF)
-    end
-
-    -- ── Create ESP for a character ────────────────────────────────
-    local function CreateESP(char)
-        if ESP_Cache[char] then return end
-
-        local e = {}
-
-        -- Box + outline
-        e.Box           = Drawing.new("Square")
-        e.Box.Filled    = false; e.Box.ZIndex = 2; e.Box.Thickness = 1
-        e.Box.Color     = S.EnemyColor
-
-        e.BoxOut        = Drawing.new("Square")
-        e.BoxOut.Filled = false; e.BoxOut.ZIndex = 1; e.BoxOut.Thickness = 3
-        e.BoxOut.Color  = Color3.new(0,0,0)
-
-        -- Health bar + outline
-        e.HPOut           = Drawing.new("Square")
-        e.HPOut.Filled    = true; e.HPOut.ZIndex = 1; e.HPOut.Thickness = 1
-        e.HPOut.Color     = Color3.new(0,0,0)
-
-        e.HP              = Drawing.new("Square")
-        e.HP.Filled       = true; e.HP.ZIndex = 2; e.HP.Thickness = 1
-        e.HP.Color        = Color3.new(0,1,0)
-
-        -- Name
-        e.Name            = Drawing.new("Text")
-        e.Name.Size       = 16; e.Name.Center = true
-        e.Name.Outline    = true; e.Name.ZIndex = 3
-        e.Name.Color      = Color3.new(1,1,1)
-
-        -- Distance
-        e.Dist            = Drawing.new("Text")
-        e.Dist.Size       = 14; e.Dist.Center = true
-        e.Dist.Outline    = true; e.Dist.ZIndex = 3
-        e.Dist.Color      = Color3.new(1,1,1)
-
-        -- Weapon
-        e.Weapon          = Drawing.new("Text")
-        e.Weapon.Size     = 14; e.Weapon.Center = true
-        e.Weapon.Outline  = true; e.Weapon.ZIndex = 3
-        e.Weapon.Color    = Color3.new(1,1,1)
-
-        -- Tracer
-        e.Tracer          = Drawing.new("Line")
-        e.Tracer.Thickness= 1; e.Tracer.ZIndex = 1
-        e.Tracer.Color    = S.EnemyColor
-
-        -- Highlight (Chams – Instance, not Drawing)
-        e.Highlight       = nil
-
-        -- Skeleton lines
-        e.Skel = {
-            H2T  = newSkelLine(), U2L  = newSkelLine(),
-            LUA  = newSkelLine(), LLA  = newSkelLine(), LH   = newSkelLine(),
-            RUA  = newSkelLine(), RLA  = newSkelLine(), RH   = newSkelLine(),
-            LULg = newSkelLine(), LLL  = newSkelLine(), LF   = newSkelLine(),
-            RULg = newSkelLine(), RLL  = newSkelLine(), RF   = newSkelLine(),
-        }
-
-        -- All invisible by default
-        for _, v in pairs(e) do
-            if type(v) == "userdata" and v ~= e.Skel then
-                pcall(function() v.Visible = false end)
+        local myRoot = getRootPart()
+        local targetRoot = char and char:FindFirstChild("HumanoidRootPart")
+        if myRoot and targetRoot then
+            local distance = (myRoot.Position - targetRoot.Position).Magnitude
+            if distance > 250 then
+                hideSkeletonLines(esp.SkeletonLines)
+                return
             end
         end
 
-        ESP_Cache[char] = e
+        local head = getSkeletonPoint(char, "Head")
+        local upperTorso = getSkeletonPoint(char, "UpperTorso") or getSkeletonPoint(char, "Torso")
+        local lowerTorso = getSkeletonPoint(char, "LowerTorso") or upperTorso
+        local leftUpperArm = getSkeletonPoint(char, "LeftUpperArm") or getSkeletonPoint(char, "Left Arm")
+        local leftLowerArm = getSkeletonPoint(char, "LeftLowerArm")
+        local leftHand = getSkeletonPoint(char, "LeftHand")
+        local rightUpperArm = getSkeletonPoint(char, "RightUpperArm") or getSkeletonPoint(char, "Right Arm")
+        local rightLowerArm = getSkeletonPoint(char, "RightLowerArm")
+        local rightHand = getSkeletonPoint(char, "RightHand")
+        local leftUpperLeg = getSkeletonPoint(char, "LeftUpperLeg") or getSkeletonPoint(char, "Left Leg")
+        local leftLowerLeg = getSkeletonPoint(char, "LeftLowerLeg")
+        local leftFoot = getSkeletonPoint(char, "LeftFoot")
+        local rightUpperLeg = getSkeletonPoint(char, "RightUpperLeg") or getSkeletonPoint(char, "Right Leg")
+        local rightLowerLeg = getSkeletonPoint(char, "RightLowerLeg")
+        local rightFoot = getSkeletonPoint(char, "RightFoot")
+
+        if not head or not upperTorso then
+            hideSkeletonLines(esp.SkeletonLines)
+            return
+        end
+
+        local neckPoint = Vector2.new((head.X + upperTorso.X) / 2, (head.Y + upperTorso.Y) / 2)
+
+        setSkeletonLine(esp.SkeletonLines.HeadToTorso, head, neckPoint)
+        setSkeletonLine(esp.SkeletonLines.UpperToLowerTorso, upperTorso, lowerTorso)
+        setSkeletonLine(esp.SkeletonLines.LeftUpperArm, upperTorso, leftUpperArm)
+        setSkeletonLine(esp.SkeletonLines.LeftLowerArm, leftUpperArm, leftLowerArm or leftHand)
+        setSkeletonLine(esp.SkeletonLines.LeftHand, leftLowerArm, leftHand)
+        setSkeletonLine(esp.SkeletonLines.RightUpperArm, upperTorso, rightUpperArm)
+        setSkeletonLine(esp.SkeletonLines.RightLowerArm, rightUpperArm, rightLowerArm or rightHand)
+        setSkeletonLine(esp.SkeletonLines.RightHand, rightLowerArm, rightHand)
+        setSkeletonLine(esp.SkeletonLines.LeftUpperLeg, lowerTorso, leftUpperLeg)
+        setSkeletonLine(esp.SkeletonLines.LeftLowerLeg, leftUpperLeg, leftLowerLeg or leftFoot)
+        setSkeletonLine(esp.SkeletonLines.LeftFoot, leftLowerLeg, leftFoot)
+        setSkeletonLine(esp.SkeletonLines.RightUpperLeg, lowerTorso, rightUpperLeg)
+        setSkeletonLine(esp.SkeletonLines.RightLowerLeg, rightUpperLeg, rightLowerLeg or rightFoot)
+        setSkeletonLine(esp.SkeletonLines.RightFoot, rightLowerLeg, rightFoot)
+    end
+
+    local function CreateESP(char)
+        local esp = {
+            Box = Drawing.new("Square"),
+            BoxOutline = Drawing.new("Square"),
+            HealthBar = Drawing.new("Square"),
+            HealthBarOutline = Drawing.new("Square"),
+            Name = Drawing.new("Text"),
+            Distance = Drawing.new("Text"),
+            Weapon = Drawing.new("Text"),
+            Tracer = Drawing.new("Line"),
+            Highlight = nil,
+            SkeletonLines = {
+                HeadToTorso = createSkeletonLine(), UpperToLowerTorso = createSkeletonLine(),
+                LeftUpperArm = createSkeletonLine(), LeftLowerArm = createSkeletonLine(), LeftHand = createSkeletonLine(),
+                RightUpperArm = createSkeletonLine(), RightLowerArm = createSkeletonLine(), RightHand = createSkeletonLine(),
+                LeftUpperLeg = createSkeletonLine(), LeftLowerLeg = createSkeletonLine(), LeftFoot = createSkeletonLine(),
+                RightUpperLeg = createSkeletonLine(), RightLowerLeg = createSkeletonLine(), RightFoot = createSkeletonLine()
+            }
+        }
+        
+        esp.Box.Color = S.EnemyColor; esp.Box.Thickness = 1; esp.Box.Filled = false; esp.Box.ZIndex = 2
+        esp.BoxOutline.Color = Color3.new(0, 0, 0); esp.BoxOutline.Thickness = 3; esp.BoxOutline.Filled = false; esp.BoxOutline.ZIndex = 1
+        esp.HealthBar.Color = Color3.new(0, 1, 0); esp.HealthBar.Thickness = 1; esp.HealthBar.Filled = true; esp.HealthBar.ZIndex = 2
+        esp.HealthBarOutline.Color = Color3.new(0, 0, 0); esp.HealthBarOutline.Thickness = 1; esp.HealthBarOutline.Filled = true; esp.HealthBarOutline.ZIndex = 1
+        esp.Name.Color = Color3.new(1, 1, 1); esp.Name.Size = 16; esp.Name.Center = true; esp.Name.Outline = true; esp.Name.ZIndex = 3
+        esp.Distance.Color = Color3.new(1, 1, 1); esp.Distance.Size = 14; esp.Distance.Center = true; esp.Distance.Outline = true; esp.Distance.ZIndex = 3
+        esp.Weapon.Color = Color3.new(1, 1, 1); esp.Weapon.Size = 14; esp.Weapon.Center = true; esp.Weapon.Outline = true; esp.Weapon.ZIndex = 3
+        esp.Tracer.Color = S.EnemyColor; esp.Tracer.Thickness = 1; esp.Tracer.ZIndex = 1
+        
+        ESP_Cache[char] = esp
     end
 
     local function RemoveESP(char)
-        local e = ESP_Cache[char]
-        if not e then return end
-        for k, v in pairs(e) do
-            if k == "Highlight" and v then
-                pcall(function() v:Destroy() end)
-            elseif k == "Skel" and type(v) == "table" then
-                for _, ln in pairs(v) do
-                    pcall(function() ln.Visible = false; ln:Remove() end)
+        if ESP_Cache[char] then
+            for k, v in pairs(ESP_Cache[char]) do
+                if k == "Highlight" and v then
+                    pcall(function() v:Destroy() end)
+                elseif k == "SkeletonLines" and v then
+                    for _, line in pairs(v) do pcall(function() line.Visible = false; line:Remove() end) end
+                else
+                    pcall(function() v.Visible = false; v:Remove() end)
                 end
-            elseif type(v) == "userdata" then
-                pcall(function() v.Visible = false; v:Remove() end)
             end
+            ESP_Cache[char] = nil
         end
-        ESP_Cache[char] = nil
     end
 
-    local function hideAll(e)
-        e.Box.Visible = false; e.BoxOut.Visible = false
-        e.HP.Visible  = false; e.HPOut.Visible  = false
-        e.Name.Visible = false; e.Dist.Visible = false
-        e.Weapon.Visible = false; e.Tracer.Visible = false
-        hideSkelLines(e.Skel)
-        if e.Highlight then e.Highlight:Destroy(); e.Highlight = nil end
-    end
-
-    -- ── Cleanup when model removed ────────────────────────────────
     workspace.DescendantRemoving:Connect(function(desc)
         if desc:IsA("Model") and ESP_Cache[desc] then RemoveESP(desc) end
     end)
 
-    -- ── Main render loop ─────────────────────────────────────────
     RunService.RenderStepped:Connect(function()
         Camera = workspace.CurrentCamera or Camera
         if not Camera then return end
 
-        -- Scan new characters every 0.5s
-        -- FIX: Use Players:GetPlayers() instead of workspace:GetChildren()
-        -- so characters inside subfolders are never missed
+        for char, esp in pairs(ESP_Cache) do
+            local isModelValid = char and char.Parent and char:IsDescendantOf(workspace)
+            local hum = char and char:FindFirstChildOfClass("Humanoid")
+            local hasRoot = char and char:FindFirstChild("HumanoidRootPart")
+            if not isModelValid or not hum or hum.Health <= 0 or not hasRoot or hum:GetState() == Enum.HumanoidStateType.Dead then
+                RemoveESP(char)
+            end
+        end
+
         local now = tick()
-        if now - lastScanT > 0.5 then
-            lastScanT = now
+        if S.Enabled and now - TeamCheckState.lastESPScanTime > 0.5 then
+            TeamCheckState.lastESPScanTime = now
             for _, player in ipairs(Players:GetPlayers()) do
                 local char = player.Character
-                if player ~= LocalPlayer and char then
-                    local hum  = char:FindFirstChildOfClass("Humanoid")
+                if char and char ~= LocalPlayer.Character then
+                    local hum = char:FindFirstChildOfClass("Humanoid")
                     local root = char:FindFirstChild("HumanoidRootPart")
-                    if hum and hum.Health > 0 and root
-                        and hum:GetState() ~= Enum.HumanoidStateType.Dead
-                        and not ESP_Cache[char]
-                    then
-                        CreateESP(char)
+                    if hum and hum.Health > 0 and root and hum:GetState() ~= Enum.HumanoidStateType.Dead then
+                        if not ESP_Cache[char] then CreateESP(char) end
                     end
-                end
-            end
-
-            -- Remove dead/gone
-            for char in pairs(ESP_Cache) do
-                local hum = char and char:FindFirstChildOfClass("Humanoid")
-                if not char.Parent
-                    or not hum
-                    or hum.Health <= 0
-                    or hum:GetState() == Enum.HumanoidStateType.Dead
-                then
-                    RemoveESP(char)
                 end
             end
         end
 
-        -- Update each cached character
-        for char, e in pairs(ESP_Cache) do
+        for char, esp in pairs(ESP_Cache) do
             if char:IsA("Model") and char ~= LocalPlayer.Character then
-                local hum  = char:FindFirstChildOfClass("Humanoid")
+                local hum = char:FindFirstChildOfClass("Humanoid")
                 local root = char:FindFirstChild("HumanoidRootPart")
-                local head = char:FindFirstChild("Head")
 
-                if not hum or not root or not head or hum.Health <= 0
-                    or hum:GetState() == Enum.HumanoidStateType.Dead
-                then
-                    hideAll(e)
-                else
-                    -- Team check
+                if hum and hum.Health > 0 and root and hum:GetState() ~= Enum.HumanoidStateType.Dead then
+                    local head = char:FindFirstChild("Head")
+                    local isAlive = root and hum.Health > 0
+                    
                     local plr = Players:GetPlayerFromCharacter(char)
-                    local isTeammate = plr and isSameTeam(plr) or false
-
-                    -- Distance check
+                    local isTeammate = S.TeamCheck and plr and isSameTeam(plr) or false
+                    
                     local myRoot = getRootPart()
-                    local dist = myRoot and (myRoot.Position - root.Position).Magnitude or 0
-
-                    if not S.Enabled or isTeammate or dist > S.MaxDist then
-                        hideAll(e); 
-                    else
-                        -- Project to screen
-                        local rootP, onScreen = Camera:WorldToViewportPoint(root.Position)
-                        local headP           = Camera:WorldToViewportPoint(head.Position + Vector3.new(0, 0.5, 0))
-                        local legP            = Camera:WorldToViewportPoint(root.Position - Vector3.new(0, 3, 0))
-
-                        if not onScreen or rootP.Z <= 0 then
-                            hideAll(e)
-                        else
-                            local height = math.max(math.abs(headP.Y - legP.Y), 1)
-                            local width  = math.max(height / 2, 1)
-                            local bX     = rootP.X - width  / 2
-                            local bY     = rootP.Y - height / 2
-
-                            -- Box
+                    local dist = myRoot and math.floor((myRoot.Position - root.Position).Magnitude) or 0
+                    local inRange = dist <= S.MaxDist
+                    
+                    local shouldShow = S.Enabled and isAlive and not isTeammate and inRange
+                    
+                    if shouldShow then
+                        local rootPos, onScreen = Camera:WorldToViewportPoint(root.Position)
+                        local headPartPos = head and head.Position or (root.Position + Vector3.new(0, 1.5, 0))
+                        local headPos = Camera:WorldToViewportPoint(headPartPos + Vector3.new(0, 0.5, 0))
+                        local legPos = Camera:WorldToViewportPoint(root.Position - Vector3.new(0, 3, 0))
+                        
+                        if onScreen then
+                            local height = math.abs(headPos.Y - legPos.Y)
+                            local width = height / 2
+                            
                             if S.Boxes then
-                                e.Box.Size = Vector2.new(width, height)
-                                e.Box.Position = Vector2.new(bX, bY)
-                                e.Box.Color = S.EnemyColor
-                                e.Box.Visible = true
-                                e.BoxOut.Size = e.Box.Size
-                                e.BoxOut.Position = e.Box.Position
-                                e.BoxOut.Visible = true
+                                esp.Box.Color = S.EnemyColor; esp.Box.Size = Vector2.new(width, height)
+                                esp.Box.Position = Vector2.new(rootPos.X - width / 2, rootPos.Y - height / 2)
+                                esp.Box.Visible = true; esp.BoxOutline.Size = esp.Box.Size
+                                esp.BoxOutline.Position = esp.Box.Position; esp.BoxOutline.Visible = true
                             else
-                                e.Box.Visible = false; e.BoxOut.Visible = false
+                                esp.Box.Visible = false; esp.BoxOutline.Visible = false
                             end
-
-                            -- Health bar (left side)
+                            
                             if S.Health then
-                                local pct = math.clamp(hum.Health / math.max(hum.MaxHealth, 1), 0, 1)
-                                local barH = height * pct
-                                e.HPOut.Size     = Vector2.new(4, height + 2)
-                                e.HPOut.Position = Vector2.new(bX - 6, bY - 1)
-                                e.HPOut.Visible  = true
-                                e.HP.Size        = Vector2.new(2, math.max(barH, 1))
-                                e.HP.Position    = Vector2.new(bX - 5, bY + height - barH)
-                                e.HP.Color       = Color3.fromHSV(pct * 0.3, 1, 1)
-                                e.HP.Visible     = true
+                                local healthPercent = math.clamp(hum.Health / hum.MaxHealth, 0, 1)
+                                local healthHeight = height * healthPercent
+                                esp.HealthBarOutline.Size = Vector2.new(4, height + 2)
+                                esp.HealthBarOutline.Position = Vector2.new(rootPos.X - width / 2 - 6, rootPos.Y - height / 2 - 1)
+                                esp.HealthBarOutline.Visible = true
+                                esp.HealthBar.Size = Vector2.new(2, healthHeight)
+                                esp.HealthBar.Position = Vector2.new(rootPos.X - width / 2 - 5, rootPos.Y + height / 2 - healthHeight)
+                                esp.HealthBar.Color = Color3.fromHSV(healthPercent * 0.3, 1, 1)
+                                esp.HealthBar.Visible = true
                             else
-                                e.HP.Visible = false; e.HPOut.Visible = false
+                                esp.HealthBar.Visible = false; esp.HealthBarOutline.Visible = false
                             end
-
-                            -- Name
+                            
                             if S.Names then
-                                e.Name.Text     = plr and plr.Name or ("[Bot] " .. char.Name)
-                                e.Name.Position = Vector2.new(rootP.X, bY - 18)
-                                e.Name.Visible  = true
+                                local pName = plr and (plr.DisplayName or plr.Name) or ("[Bot] " .. char.Name)
+                                esp.Name.Text = pName; esp.Name.Position = Vector2.new(rootPos.X, rootPos.Y - height / 2 - 18)
+                                esp.Name.Visible = true
                             else
-                                e.Name.Visible = false
+                                esp.Name.Visible = false
                             end
-
-                            -- Distance
+                            
                             if S.Distance then
-                                e.Dist.Text     = "[" .. math.floor(dist) .. "m]"
-                                e.Dist.Position = Vector2.new(rootP.X, bY + height + 2)
-                                e.Dist.Visible  = true
+                                esp.Distance.Text = "[" .. tostring(dist) .. "m]"
+                                esp.Distance.Position = Vector2.new(rootPos.X, rootPos.Y + height / 2 + 2)
+                                esp.Distance.Visible = true
                             else
-                                e.Dist.Visible = false
+                                esp.Distance.Visible = false
                             end
 
-                            -- Weapon
                             if S.Weapon then
-                                local tool = char:FindFirstChildOfClass("Tool")
-                                if tool then
-                                    local yOffset = bY + height + (S.Distance and 18 or 2)
-                                    e.Weapon.Text     = tool.Name
-                                    e.Weapon.Position = Vector2.new(rootP.X, yOffset)
-                                    e.Weapon.Visible  = true
+                                local weaponName = getCharacterWeaponName(char)
+                                if weaponName then
+                                    esp.Weapon.Text = weaponName
+                                    esp.Weapon.Position = Vector2.new(rootPos.X, rootPos.Y + height / 2 + (S.Distance and 18 or 2))
+                                    esp.Weapon.Visible = true
                                 else
-                                    e.Weapon.Visible = false
+                                    esp.Weapon.Visible = false
                                 end
                             else
-                                e.Weapon.Visible = false
+                                esp.Weapon.Visible = false
                             end
-
-                            -- Tracer (from bottom center of screen)
+                            
                             if S.Tracers then
-                                e.Tracer.From    = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y)
-                                e.Tracer.To      = Vector2.new(rootP.X, rootP.Y + height / 2)
-                                e.Tracer.Color   = S.EnemyColor
-                                e.Tracer.Visible = true
+                                esp.Tracer.Color = S.EnemyColor; esp.Tracer.From = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y)
+                                esp.Tracer.To = Vector2.new(rootPos.X, rootPos.Y + height / 2); esp.Tracer.Visible = true
                             else
-                                e.Tracer.Visible = false
+                                esp.Tracer.Visible = false
                             end
 
-                            -- Skeleton
-                            updateSkeleton(char, e)
-
-                            -- Chams (Highlight instance)
-                            if S.Chams then
-                                if not e.Highlight or not e.Highlight.Parent then
-                                    if e.Highlight then pcall(function() e.Highlight:Destroy() end) end
-                                    local hl = Instance.new("Highlight")
-                                    hl.Name = "ESPCham"
-                                    hl.FillTransparency    = 0.5
-                                    hl.OutlineTransparency = 0
-                                    hl.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
-                                    hl.Parent = char
-                                    e.Highlight = hl
-                                end
-                                e.Highlight.FillColor    = S.EnemyColor
-                                e.Highlight.OutlineColor = Color3.new(1,1,1)
-                            else
-                                if e.Highlight then pcall(function() e.Highlight:Destroy() end); e.Highlight = nil end
-                            end
+                            updateSkeletonESP(char, esp)
+                        else
+                            esp.Box.Visible = false; esp.BoxOutline.Visible = false
+                            esp.HealthBar.Visible = false; esp.HealthBarOutline.Visible = false
+                            esp.Name.Visible = false; esp.Distance.Visible = false; esp.Weapon.Visible = false; esp.Tracer.Visible = false
+                            hideSkeletonLines(esp.SkeletonLines)
                         end
+                        
+                        if S.Chams then
+                            if not esp.Highlight or esp.Highlight.Parent ~= char then
+                                if esp.Highlight then pcall(function() esp.Highlight:Destroy() end) end
+                                local hl = Instance.new("Highlight")
+                                hl.Name = "ESPCham"
+                                hl.FillTransparency = 0.5
+                                hl.OutlineTransparency = 0
+                                hl.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+                                hl.Parent = char
+                                esp.Highlight = hl
+                            end
+                            esp.Highlight.FillColor = S.EnemyColor
+                            esp.Highlight.OutlineColor = Color3.new(1, 1, 1)
+                        else
+                            if esp.Highlight then pcall(function() esp.Highlight:Destroy() end); esp.Highlight = nil end
+                        end
+                        
+                    else
+                        esp.Box.Visible = false; esp.BoxOutline.Visible = false
+                        esp.HealthBar.Visible = false; esp.HealthBarOutline.Visible = false
+                        esp.Name.Visible = false; esp.Distance.Visible = false; esp.Weapon.Visible = false; esp.Tracer.Visible = false
+                        hideSkeletonLines(esp.SkeletonLines)
+                        if esp.Highlight then pcall(function() esp.Highlight:Destroy() end); esp.Highlight = nil end
                     end
                 end
             end
@@ -604,7 +963,7 @@ do
 
     -- ── UI Controls ──────────────────────────────────────────────
 
-    Tabs.ESP:AddToggle("ESPMaster",   { Title = "Enable ESP",             Default = false }):OnChanged(function() S.Enabled   = Options.ESPMaster.Value   end)
+    Tabs.ESP:AddToggle("ESPMaster",   { Title = "Enable ESP",             Default = true }):OnChanged(function() S.Enabled   = Options.ESPMaster.Value   end)
     Tabs.ESP:AddToggle("ESPBoxes",    { Title = "Show Boxes",             Default = true  }):OnChanged(function() S.Boxes     = Options.ESPBoxes.Value    end)
     Tabs.ESP:AddToggle("ESPNames",    { Title = "Show Names",             Default = true  }):OnChanged(function() S.Names     = Options.ESPNames.Value    end)
     Tabs.ESP:AddToggle("ESPDist",     { Title = "Show Distance",          Default = true  }):OnChanged(function() S.Distance  = Options.ESPDist.Value     end)
@@ -613,6 +972,18 @@ do
     Tabs.ESP:AddToggle("ESPChams",    { Title = "Show Chams",             Default = false }):OnChanged(function() S.Chams     = Options.ESPChams.Value    end)
     Tabs.ESP:AddToggle("ESPSkeleton", { Title = "Show Skeleton",          Default = false }):OnChanged(function() S.Skeleton  = Options.ESPSkeleton.Value end)
     Tabs.ESP:AddToggle("ESPWeapon",   { Title = "Show Weapon Name",       Default = false }):OnChanged(function() S.Weapon    = Options.ESPWeapon.Value   end)
+    Tabs.ESP:AddToggle("ESPTeamCheck", { Title = "Team Check (Skip Teammates)", Default = false }):OnChanged(function() S.TeamCheck = Options.ESPTeamCheck.Value end)
+    
+    Tabs.ESP:AddDropdown("TeamCheckMode", {
+        Title = "Team Check Mode",
+        Values = {
+            "Auto Detect", "Auto (Try All)", "Roblox Teams", "FactionType Attribute",
+            "Team Attribute", "IntValue (Team)", "StringValue (Team)", "TeamColor",
+            "Role Attribute", "Crew / Guild Tag", "Display Name Color", "Shirt Template",
+            "Leaderstats / Side"
+        },
+        Default = 1
+    }):OnChanged(function(value) S.TeamCheckMode = value end)
 
     Tabs.ESP:AddSlider("ESPMaxDist", {
         Title = "Max Distance", Default = 1000, Min = 50, Max = 5000, Rounding = 0,
@@ -623,9 +994,6 @@ do
         S.EnemyColor = Options.ESPEnemyColor.Value
     end)
 
-    Tabs.ESP:AddToggle("ESPTeamCheck", { Title = "Team Check", Default = true }):OnChanged(function()
-        S.TeamCheck = Options.ESPTeamCheck.Value
-    end)
 end
 
 -- ================================================================
@@ -636,7 +1004,7 @@ do
     local CS = {
         aimbotEnabled      = false,
         aimbotHoldEnabled  = true,   -- true = must hold RMB to aim
-        aimbotAimPart      = "Head",
+        aimbotHeadRate     = 100,
         aimbotFov          = 180,
         aimbotSmoothness   = 0.18,
         aimbotTarget       = nil,
@@ -691,20 +1059,35 @@ do
 
     -- Check whether a target character is valid
     local function isValidTarget(char)
-        if not char or char == LocalPlayer.Character then return false end
+        if not char or char == LocalPlayer.Character or not char.Parent then return false end
         local root = char:FindFirstChild("HumanoidRootPart")
         local hum  = char:FindFirstChildOfClass("Humanoid")
-        if not root or not hum or hum.Health <= 0 then return false end
+        if not root or not hum or hum.Health <= 0.1 then return false end
         if hum:GetState() == Enum.HumanoidStateType.Dead then return false end
+        
+        -- ForceField check for spawn protection
+        for _, child in ipairs(char:GetChildren()) do
+            if child:IsA("ForceField") or string.lower(child.Name):find("forcefield") then
+                return false
+            end
+        end
+        
         return true
     end
 
     -- Get the aim part on the target character
     local function getAimPart(char)
         if not isValidTarget(char) then return nil end
-        local part = char:FindFirstChild(CS.aimbotAimPart)
+        
+        -- Default to 100% headshot if not set
+        local headRate = CS.aimbotHeadRate or 100 
+        local isHeadshot = (math.random(1, 100) <= headRate)
+        local targetPartName = isHeadshot and "Head" or "HumanoidRootPart"
+        
+        local part = char:FindFirstChild(targetPartName)
         if part and part:IsA("BasePart") then return part end
-        -- fallback
+        
+        -- fallback if requested part doesn't exist
         for _, name in ipairs({"Head", "HumanoidRootPart", "UpperTorso", "Torso"}) do
             local p = char:FindFirstChild(name)
             if p and p:IsA("BasePart") then return p end
@@ -759,14 +1142,13 @@ do
         CS.aimbotHoldEnabled = Options.AimbotHold.Value
     end)
 
-    AimbotGroup:AddDropdown("AimbotAimPart", {
-        Title = "Aim Part",
-        Values = {"Head", "HumanoidRootPart", "UpperTorso", "Torso"},
-        Multi = false, Default = "Head"
-    }):OnChanged(function(v)
-        CS.aimbotAimPart = v
-        CS.aimbotTarget  = nil   -- reset so a new target is selected
-    end)
+    AimbotGroup:AddSlider("AimbotHeadRate", {
+        Title = "Headshot Chance (%)", Default = 100, Min = 0, Max = 100, Rounding = 0,
+        Callback = function(v) 
+            CS.aimbotHeadRate = v 
+            CS.aimbotTarget = nil -- Reset target when headshot rate changes
+        end
+    })
 
     AimbotGroup:AddSlider("AimbotFov", {
         Title = "FOV Radius", Default = 180, Min = 25, Max = 600, Rounding = 0,
@@ -843,12 +1225,13 @@ do
     end
 
     -- ── Helper: restore original values ──────────────────────────────
-    local function restoreValues(obj)
-        if not obj or not patchedValues[obj] then return end
-        for key, original in pairs(patchedValues[obj]) do
-            pcall(function() obj[key] = original end)
+    local function restoreAllValues()
+        for obj, keys in pairs(patchedValues) do
+            for key, original in pairs(keys) do
+                pcall(function() obj[key] = original end)
+            end
         end
-        patchedValues[obj] = nil
+        patchedValues = {}
     end
 
     -- ── Scan tool descendants and patch matching keyword values ──────
@@ -875,7 +1258,7 @@ do
                             for _, ks in ipairs(keywordSets) do
                                 for _, kw in ipairs(ks.keywords) do
                                     if lk:find(kw, 1, true) then
-                                        rememberValue(desc, k)
+                                        rememberValue(m, k)
                                         m[k] = ks.value
                                         break
                                     end
@@ -894,9 +1277,7 @@ do
     }):OnChanged(function()
         CS.noSpreadEnabled = Options.NoSpread.Value
         if not CS.noSpreadEnabled then
-            local char = LocalPlayer.Character
-            local tool = char and char:FindFirstChildOfClass("Tool")
-            if tool then restoreValues(tool) end
+            restoreAllValues()
         end
         Fluent:Notify({
             Title   = "No Spread",
@@ -910,6 +1291,9 @@ do
         Title = "Infinite Ammo", Default = false
     }):OnChanged(function()
         CS.infiniteAmmoEnabled = Options.InfiniteAmmo.Value
+        if not CS.infiniteAmmoEnabled then
+            restoreAllValues()
+        end
         Fluent:Notify({
             Title   = "Infinite Ammo",
             Content = CS.infiniteAmmoEnabled and "Enabled!" or "Disabled.",
@@ -923,9 +1307,7 @@ do
     }):OnChanged(function()
         CS.rapidFireEnabled = Options.FastFire.Value
         if not CS.rapidFireEnabled then
-            local char = LocalPlayer.Character
-            local tool = char and char:FindFirstChildOfClass("Tool")
-            if tool then restoreValues(tool) end
+            restoreAllValues()
         end
         Fluent:Notify({
             Title   = "Fast Fire",
@@ -1100,24 +1482,23 @@ do
             "WeaponsSystem (Game 4)",
             "FireWeapon (Game 5)",
             "Shoot (Game 6)",
-            "Crossbow (Game 7)"
+            "Crossbow (Game 7)",
+            "Routers (Game 8)"
         },
         Multi = false, Default = "WeaponHit (Game 1)"
     }):OnChanged(function(v) CS.killAuraMethod = v end)
 
     KillAuraGroup:AddSlider("KillAuraRadius", {
-        Title = "Aura Range", Default = 150, Min = 10, Max = 500, Rounding = 0
+        Title = "Aura Range", Default = 250, Min = 10, Max = 1000, Rounding = 0
     }):OnChanged(function() CS.killAuraRadius = Options.KillAuraRadius.Value end)
 
     KillAuraGroup:AddSlider("KillAuraDelay", {
-        Title = "Attack Delay (ms)", Default = 10, Min = 1, Max = 100, Rounding = 0
-    }):OnChanged(function() CS.killAuraDelay = Options.KillAuraDelay.Value / 100 end)
+        Title = "Attack Delay (s)", Default = 0.05, Min = 0.001, Max = 1, Rounding = 3
+    }):OnChanged(function() CS.killAuraDelay = Options.KillAuraDelay.Value end)
 
-    KillAuraGroup:AddDropdown("KillAuraPart", {
-        Title = "Target Part",
-        Values = { "Head", "UpperTorso", "Torso", "HumanoidRootPart" },
-        Multi = false, Default = "Head"
-    }):OnChanged(function(v) CS.killAuraPart = v end)
+    KillAuraGroup:AddSlider("KillAuraHeadRate", {
+        Title = "Headshot Chance (%)", Default = 100, Min = 0, Max = 100, Rounding = 0
+    }):OnChanged(function() CS.killAuraHeadRate = Options.KillAuraHeadRate.Value end)
 
     KillAuraGroup:AddToggle("KillAuraWallCheck", {
         Title = "Wall Check (visible only)", Default = false
@@ -1142,27 +1523,28 @@ do
         for _, player in ipairs(Players:GetPlayers()) do
             if player ~= LocalPlayer then
                 local pChar = getPlayerCharacter(player)
-                if pChar then
+                if isValidTarget(pChar) then
                     local tRoot = pChar:FindFirstChild("HumanoidRootPart")
                     local tHum  = pChar:FindFirstChildOfClass("Humanoid")
-                    if tRoot and tHum and tHum.Health > 0 then
-                        local dist = (myRoot.Position - tRoot.Position).Magnitude
-                        if dist <= CS.killAuraRadius then
-                            local targetPart = pChar:FindFirstChild(CS.killAuraPart) or tRoot
-                            local canSee = true
-                            if CS.killAuraWallCheck then
-                                canSee = isVisible(targetPart)
-                            end
-                            if canSee then
-                                table.insert(targets, {
-                                    player    = player,
-                                    character = pChar,
-                                    root      = tRoot,
-                                    humanoid  = tHum,
-                                    targetPart = targetPart,
-                                    distance  = dist
-                                })
-                            end
+                    local dist = (myRoot.Position - tRoot.Position).Magnitude
+                    if dist <= CS.killAuraRadius then
+                        local headRate = CS.killAuraHeadRate or 100
+                        local isHeadshot = (math.random(1, 100) <= headRate)
+                        local partName = isHeadshot and "Head" or "HumanoidRootPart"
+                        local targetPart = pChar:FindFirstChild(partName) or tRoot
+                        local canSee = true
+                        if CS.killAuraWallCheck then
+                            canSee = isVisible(targetPart)
+                        end
+                        if canSee then
+                            table.insert(targets, {
+                                player    = player,
+                                character = pChar,
+                                root      = tRoot,
+                                humanoid  = tHum,
+                                targetPart = targetPart,
+                                distance  = dist
+                            })
                         end
                     end
                 end
@@ -1176,10 +1558,10 @@ do
                 local dir = (targetPart.Position - myRoot.Position).Unit
 
                 if CS.killAuraMethod == "WeaponHit (Game 1)" then
-                    local eventos = RS:WaitForChild("Eventos", 1)
+                    local eventos = RS:FindFirstChild("Eventos")
                     if not eventos then return end
-                    local weaponFired = eventos:WaitForChild("WeaponFired", 1)
-                    local weaponHit   = eventos:WaitForChild("WeaponHit", 1)
+                    local weaponFired = eventos:FindFirstChild("WeaponFired")
+                    local weaponHit   = eventos:FindFirstChild("WeaponHit")
                     if not weaponFired or not weaponHit then return end
                     local sid = math.random(1, 10)
                     weaponFired:FireServer(weapon, { id=sid, charge=0, origin=myRoot.Position, dir=dir })
@@ -1190,34 +1572,34 @@ do
                     })
 
                 elseif CS.killAuraMethod == "RequestActionSync (Game 2)" then
-                    local sysRes  = RS:WaitForChild("SystemResources", 1)
-                    local bufCache= sysRes and sysRes:WaitForChild("BufferCache", 1)
-                    local ras     = bufCache and bufCache:WaitForChild("RequestActionSync", 1)
-                    local events  = RS:WaitForChild("Events", 1)
-                    local rEvts   = events and events:WaitForChild("RemoteEvents", 1)
-                    local fakeBullet = rEvts and rEvts:WaitForChild("ReplicateFakeBullet", 1)
-                    local muzzle     = rEvts and rEvts:WaitForChild("CharacterMuzzleFlash", 1)
+                    local sysRes  = RS:FindFirstChild("SystemResources")
+                    local bufCache= sysRes and sysRes:FindFirstChild("BufferCache")
+                    local ras     = bufCache and bufCache:FindFirstChild("RequestActionSync")
+                    local events  = RS:FindFirstChild("Events")
+                    local rEvts   = events and events:FindFirstChild("RemoteEvents")
+                    local fakeBullet = rEvts and rEvts:FindFirstChild("ReplicateFakeBullet")
+                    local muzzle     = rEvts and rEvts:FindFirstChild("CharacterMuzzleFlash")
                     if not ras then return end
                     ras:FireServer({
                         direction=dir, hitPosition=targetPart.Position,
                         origin=myRoot.Position, hitInstance=targetPart,
                         hitHumanoid=t.humanoid,
-                        IsHeadshot = (CS.killAuraPart == "Head")
+                        IsHeadshot = (targetPart.Name == "Head")
                     })
                     if fakeBullet then fakeBullet:FireServer(CFrame.new(myRoot.Position, targetPart.Position), dir) end
                     if muzzle     then muzzle:FireServer() end
 
                 elseif CS.killAuraMethod == "GunRemote (Game 3)" then
-                    local remotes   = RS:WaitForChild("Remotes", 1)
-                    local gunRemote = remotes and remotes:WaitForChild("GunRemote", 1)
+                    local remotes   = RS:FindFirstChild("Remotes")
+                    local gunRemote = remotes and remotes:FindFirstChild("GunRemote")
                     if not gunRemote then return end
                     gunRemote:FireServer(1, weapon, targetPart.Position, Vector3.yAxis, targetPart)
 
                 elseif CS.killAuraMethod == "WeaponsSystem (Game 4)" then
-                    local ws  = RS:WaitForChild("WeaponsSystem", 1)
-                    local net = ws and ws:WaitForChild("Network", 1)
-                    local wFired = net and net:WaitForChild("WeaponFired", 1)
-                    local wHit   = net and net:WaitForChild("WeaponHit", 1)
+                    local ws  = RS:FindFirstChild("WeaponsSystem")
+                    local net = ws and ws:FindFirstChild("Network")
+                    local wFired = net and net:FindFirstChild("WeaponFired")
+                    local wHit   = net and net:FindFirstChild("WeaponHit")
                     if not wFired or not wHit then return end
                     local cur = weapon or myChar:FindFirstChildOfClass("Tool")
                     if not cur then return end
@@ -1238,7 +1620,7 @@ do
                     local hitboxPart = targetPart
                     local hitboxHandler = t.character:FindFirstChild("HitboxHandler")
                     if hitboxHandler then
-                        local pName = (CS.killAuraPart == "Head") and "Hitbox_Head" or "Hitbox_Torso"
+                        local pName = (targetPart.Name == "Head") and "Hitbox_Head" or "Hitbox_Torso"
                         hitboxPart = hitboxHandler:FindFirstChild(pName)
                             or hitboxHandler:FindFirstChildOfClass("BasePart")
                             or targetPart
@@ -1255,7 +1637,7 @@ do
                     local shoot    = gameplay and gameplay:FindFirstChild("Shoot")
                     local ping     = func and func:FindFirstChild("Ping")
                     if not shoot or not ping then return end
-                    local headshot = (CS.killAuraPart == "Head")
+                    local headshot = (targetPart.Name == "Head")
                     local hitInst  = t.character:FindFirstChild(targetPart.Name) or targetPart
                     shoot:InvokeServer(
                         Camera.CFrame, 6, 1, 2, tick(),
@@ -1282,8 +1664,231 @@ do
                         d=t.distance, maxDist=t.distance, h=t.humanoid,
                         m=Enum.Material.Plastic, n=Vector3.yAxis, t=0.1, sid=sid
                     })
+                elseif CS.killAuraMethod == "Routers (Game 8)" then
+                    local routers = RS:FindFirstChild("Routers")
+                    if routers then
+                        local weaponSystemRemotes = routers:FindFirstChild("WeaponSystemRemotes")
+                        local notifyRemotes = routers:FindFirstChild("NotifyRemotes")
+                        
+                        local fireRemote = weaponSystemRemotes and weaponSystemRemotes:FindFirstChild("Fire")
+                        local hitRemote = weaponSystemRemotes and weaponSystemRemotes:FindFirstChild("Hit")
+                        local specRemote = notifyRemotes and notifyRemotes:FindFirstChild("SpectatorDamage")
+                        
+                        local currentWeapon = weapon or myChar:FindFirstChildOfClass("Tool")
+                        
+                        if currentWeapon and fireRemote and hitRemote then
+                            local hitInstance = t.character:FindFirstChild(targetPart.Name) or targetPart
+                            local sid = math.random(1, 100)
+                            
+                            -- 1. SpectatorDamage
+                            if specRemote then
+                                pcall(function()
+                                    specRemote:FireServer(18, targetPart.Position, false)
+                                end)
+                            end
+                            
+                            -- 2. Fire
+                            pcall(function()
+                                fireRemote:FireServer(currentWeapon, {
+                                    ["id"] = sid,
+                                    ["charge"] = 0,
+                                    ["origin"] = myRoot.Position,
+                                    ["dir"] = dir
+                                })
+                            end)
+                            
+                            -- 3. Hit
+                            pcall(function()
+                                hitRemote:FireServer(currentWeapon, {
+                                    ["p"] = targetPart.Position,
+                                    ["pid"] = 1,
+                                    ["part"] = hitInstance,
+                                    ["d"] = t.distance,
+                                    ["maxDist"] = t.distance + 1,
+                                    ["h"] = hitInstance,
+                                    ["m"] = Enum.Material.Sand,
+                                    ["n"] = Vector3.yAxis,
+                                    ["t"] = 0.737,
+                                    ["sid"] = sid
+                                })
+                            end)
+                        end
+                    end
                 end
             end)
+        end
+    end)
+
+
+end
+
+-- ================================================================
+--  TELEPORT TAB
+-- ================================================================
+do
+    local TweenService = game:GetService("TweenService")
+    local teleportTarget = nil
+    local teleportMode = "Instant"
+    local tweenSpeed = 50
+    local activeTweenFly = nil
+
+    local function doTweenFly(targetCFrame)
+        local myRoot = getRootPart()
+        local myHum = getHumanoid()
+        if not myRoot or not myHum then return end
+
+        if activeTweenFly then activeTweenFly:Disconnect() end
+
+        local dist = (myRoot.Position - targetCFrame.Position).Magnitude
+        if dist < 0.1 then return end
+        
+        local timeToTravel = dist / tweenSpeed
+        local elapsedTime = 0
+        local startCFrame = myRoot.CFrame
+
+        myHum:ChangeState(Enum.HumanoidStateType.Physics)
+
+        activeTweenFly = RunService.RenderStepped:Connect(function(deltaTime)
+            elapsedTime = elapsedTime + deltaTime
+            local alpha = math.clamp(elapsedTime / timeToTravel, 0, 1)
+            
+            -- Keep stealth physics (no gravity, no momentum)
+            myRoot.AssemblyLinearVelocity = Vector3.zero
+            myRoot.CFrame = startCFrame:Lerp(targetCFrame, alpha)
+            
+            if alpha >= 1 then
+                if activeTweenFly then activeTweenFly:Disconnect(); activeTweenFly = nil end
+                myHum:ChangeState(Enum.HumanoidStateType.GettingUp)
+            end
+        end)
+    end
+
+    local function getPlayerNames()
+        local names = {}
+        for _, p in ipairs(Players:GetPlayers()) do
+            if p ~= LocalPlayer then
+                table.insert(names, p.Name)
+            end
+        end
+        return names
+    end
+
+    local PlayerDropdown = Tabs.Teleport:AddDropdown("TeleportPlayer", {
+        Title = "Select Player",
+        Values = getPlayerNames(),
+        Multi = false,
+        Default = nil
+    })
+
+    PlayerDropdown:OnChanged(function(Value)
+        teleportTarget = Value
+    end)
+
+    Tabs.Teleport:AddButton({
+        Title = "Refresh Players",
+        Callback = function()
+            PlayerDropdown:SetValues(getPlayerNames())
+        end
+    })
+
+    Tabs.Teleport:AddDropdown("TeleportMode", {
+        Title = "Teleport Mode",
+        Values = { "Instant", "Tween" },
+        Multi = false,
+        Default = "Instant"
+    }):OnChanged(function(Value)
+        teleportMode = Value
+    end)
+
+    Tabs.Teleport:AddSlider("TweenSpeed", {
+        Title = "Tween Speed", Default = 50, Min = 10, Max = 300, Rounding = 0
+    }):OnChanged(function(Value) 
+        tweenSpeed = Value 
+    end)
+
+    Tabs.Teleport:AddButton({
+        Title = "Teleport",
+        Callback = function()
+            if not teleportTarget then 
+                Fluent:Notify({ Title = "Teleport", Content = "Please select a player first!", Duration = 3 })
+                return 
+            end
+
+            local targetPlayer = Players:FindFirstChild(teleportTarget)
+            if not targetPlayer then
+                Fluent:Notify({ Title = "Teleport", Content = "Player not found!", Duration = 3 })
+                return
+            end
+
+            local targetChar = getPlayerCharacter(targetPlayer)
+            local targetRoot = targetChar and targetChar:FindFirstChild("HumanoidRootPart")
+            if not targetRoot then
+                Fluent:Notify({ Title = "Teleport", Content = "Player character not found!", Duration = 3 })
+                return
+            end
+
+            local myRoot = getRootPart()
+            if not myRoot then return end
+
+            -- Teleport slightly behind the target
+            local targetCFrame = targetRoot.CFrame * CFrame.new(0, 0, 3)
+
+            if teleportMode == "Instant" then
+                myRoot.CFrame = targetCFrame
+                Fluent:Notify({ Title = "Teleport", Content = "Teleported Instantly!", Duration = 2 })
+            elseif teleportMode == "Tween" then
+                local dist = (myRoot.Position - targetCFrame.Position).Magnitude
+                local time = dist / tweenSpeed
+                doTweenFly(targetCFrame)
+                Fluent:Notify({ Title = "Teleport", Content = ("Tweening... (%.1fs)"):format(time), Duration = 2 })
+            end
+        end
+    })
+
+    -- ────── Click Teleport ───────────────────────────────────────
+    local clickTpEnabled = false
+    local clickTpConn = nil
+    
+    Tabs.Teleport:AddToggle("ClickTpToggle", {
+        Title = "Click Teleport", Default = false
+    }):OnChanged(function()
+        clickTpEnabled = Options.ClickTpToggle.Value
+        if clickTpEnabled then
+            if not clickTpConn then
+                local mouse = LocalPlayer:GetMouse()
+                clickTpConn = UserInputService.InputBegan:Connect(function(input, gpe)
+                    if gpe then return end
+                    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+                        local myRoot = getRootPart()
+                        if not myRoot then return end
+
+                        local targetPos = nil
+                        if input.UserInputType == Enum.UserInputType.Touch then
+                            local cam = workspace.CurrentCamera
+                            local ray = cam:ViewportPointToRay(input.Position.X, input.Position.Y)
+                            local params = RaycastParams.new()
+                            params.FilterDescendantsInstances = {LocalPlayer.Character}
+                            params.FilterType = Enum.RaycastFilterType.Exclude
+                            local result = workspace:Raycast(ray.Origin, ray.Direction * 2000, params)
+                            if result then targetPos = result.Position end
+                        else
+                            if mouse.Hit then targetPos = mouse.Hit.Position end
+                        end
+
+                        if targetPos then
+                            local targetCFrame = CFrame.new(targetPos + Vector3.new(0, 3, 0))
+                            if teleportMode == "Instant" then
+                                myRoot.CFrame = targetCFrame
+                            elseif teleportMode == "Tween" then
+                                doTweenFly(targetCFrame)
+                            end
+                        end
+                    end
+                end)
+            end
+            Fluent:Notify({ Title = "Click Teleport", Content = "Click/Tap anywhere to teleport!", Duration = 3 })
+        else
+            if clickTpConn then clickTpConn:Disconnect(); clickTpConn = nil end
         end
     end)
 end
@@ -1327,6 +1932,279 @@ do
             end)
         end
     })
+
+    -- ================================================================
+    --  UTILITIES (ANTI AFK & FORCE TIME)
+    -- ================================================================
+    local MiscUtilsGroup = Tabs.Misc:AddSection("Utilities")
+    
+    local antiAfkConn = nil
+    MiscUtilsGroup:AddToggle("AntiAFK", {
+        Title = "Anti AFK", Default = false
+    }):OnChanged(function()
+        if Options.AntiAFK.Value then
+            if not antiAfkConn then
+                local VirtualUser = game:GetService("VirtualUser")
+                antiAfkConn = LocalPlayer.Idled:Connect(function()
+                    VirtualUser:CaptureController()
+                    VirtualUser:ClickButton2(Vector2.new())
+                    Fluent:Notify({ Title = "Anti AFK", Content = "Prevented idle disconnect.", Duration = 2 })
+                end)
+                -- Also try to disable default idled connections if executor supports it
+                pcall(function()
+                    if getconnections then
+                        for _, conn in pairs(getconnections(LocalPlayer.Idled)) do
+                            if conn.Disable then conn:Disable() end
+                        end
+                    end
+                end)
+            end
+            Fluent:Notify({ Title = "Anti AFK", Content = "Enabled! You won't be kicked for idling.", Duration = 3 })
+        else
+            if antiAfkConn then antiAfkConn:Disconnect(); antiAfkConn = nil end
+        end
+    end)
+
+    local forceTimeEnabled = false
+    local forceTimeValue = 12
+    local forceTimeConns = {}
+    
+    local function clearForceTime()
+        for _, conn in ipairs(forceTimeConns) do
+            if conn then conn:Disconnect() end
+        end
+        table.clear(forceTimeConns)
+    end
+
+    MiscUtilsGroup:AddToggle("ForceTimeToggle", {
+        Title = "Force Time of Day", Default = false
+    }):OnChanged(function()
+        forceTimeEnabled = Options.ForceTimeToggle.Value
+        local Lighting = game:GetService("Lighting")
+        
+        clearForceTime()
+        
+        if forceTimeEnabled then
+            Lighting.ClockTime = forceTimeValue
+            
+            local changing = false
+            local function enforceTime()
+                if not changing and forceTimeEnabled then
+                    if Lighting.ClockTime ~= forceTimeValue then
+                        changing = true
+                        Lighting.ClockTime = forceTimeValue
+                        changing = false
+                    end
+                end
+            end
+            
+            -- Đánh chặn mọi nỗ lực đổi giờ của game ở mọi mặt trận
+            table.insert(forceTimeConns, Lighting:GetPropertyChangedSignal("ClockTime"):Connect(enforceTime))
+            table.insert(forceTimeConns, Lighting:GetPropertyChangedSignal("TimeOfDay"):Connect(enforceTime))
+            table.insert(forceTimeConns, RunService.RenderStepped:Connect(enforceTime))
+            table.insert(forceTimeConns, RunService.Heartbeat:Connect(enforceTime))
+            table.insert(forceTimeConns, RunService.Stepped:Connect(enforceTime))
+        end
+    end)
+    
+    MiscUtilsGroup:AddSlider("ForceTimeSlider", {
+        Title = "Time", Default = 12, Min = 0, Max = 24, Rounding = 1
+    }):OnChanged(function(Value)
+        forceTimeValue = Value
+    end)
+
+    -- ================================================================
+    --  BANG PLAYER
+    -- ================================================================
+    local BangGroup = Tabs.Misc:AddSection("Bang Player")
+    
+    local bangState = {
+        targetPlayer = nil,
+        speed = 3,
+        anim = nil,
+        track = nil,
+        connection = nil
+    }
+
+    local bangDropdown = BangGroup:AddDropdown("BangPlayerDropdown", {
+        Title = "Select Player",
+        Values = {},
+        Multi = false,
+        Default = 1
+    })
+
+    bangDropdown:OnChanged(function(Value)
+        bangState.targetPlayer = Value
+    end)
+
+    BangGroup:AddSlider("BangSpeedSlider", {
+        Title = "Animation Speed", Default = 3, Min = 1, Max = 10, Rounding = 1,
+        Callback = function(Value)
+            bangState.speed = Value
+            if bangState.track then
+                pcall(function() bangState.track:AdjustSpeed(bangState.speed) end)
+            end
+        end
+    })
+
+    local function refreshBangPlayerList()
+        local list = {}
+        for _, p in ipairs(Players:GetPlayers()) do
+            if p ~= LocalPlayer then
+                table.insert(list, p.Name)
+            end
+        end
+        bangDropdown:SetValues(list)
+    end
+
+    local function unbangPlayer()
+        if bangState.connection then
+            bangState.connection:Disconnect()
+            bangState.connection = nil
+        end
+        if bangState.track then
+            pcall(function() bangState.track:Stop() end)
+            bangState.track = nil
+        end
+        if bangState.anim then
+            bangState.anim:Destroy()
+            bangState.anim = nil
+        end
+    end
+
+    local function bangSelectedPlayer()
+        unbangPlayer()
+        if not bangState.targetPlayer then return end
+        
+        local target = Players:FindFirstChild(bangState.targetPlayer)
+        if not target then return end
+        
+        local myChar = LocalPlayer.Character
+        local myHum = myChar and myChar:FindFirstChildOfClass("Humanoid")
+        local myRoot = myChar and myChar:FindFirstChild("HumanoidRootPart")
+        if not myHum or not myRoot then return end
+
+        bangState.anim = Instance.new("Animation")
+        -- Detect R15 or R6
+        if myHum.RigType == Enum.HumanoidRigType.R15 then
+            bangState.anim.AnimationId = "rbxassetid://5918726674"
+        else
+            bangState.anim.AnimationId = "rbxassetid://148840371"
+        end
+
+        local animator = myHum:FindFirstChildOfClass("Animator")
+        if not animator then
+            animator = Instance.new("Animator")
+            animator.Parent = myHum
+        end
+        
+        local track = animator:LoadAnimation(bangState.anim)
+        bangState.track = track
+        track:Play()
+        track:AdjustSpeed(bangState.speed)
+
+        bangState.connection = RunService.Stepped:Connect(function()
+            local tChar = target.Character
+            local tRoot = tChar and tChar:FindFirstChild("HumanoidRootPart")
+            if tRoot and myRoot then
+                myRoot.CFrame = tRoot.CFrame * CFrame.new(0, 0, 1.1)
+            else
+                unbangPlayer()
+            end
+        end)
+    end
+
+    BangGroup:AddButton({ Title = "Bang Player", Callback = function() bangSelectedPlayer() end })
+    BangGroup:AddButton({ Title = "Unbang Player", Callback = function() unbangPlayer() end })
+    BangGroup:AddButton({ Title = "Refresh List", Callback = function() refreshBangPlayerList() end })
+
+    refreshBangPlayerList()
+    Players.PlayerAdded:Connect(refreshBangPlayerList)
+    Players.PlayerRemoving:Connect(refreshBangPlayerList)
+
+    -- ================================================================
+    --  JERK TOOL
+    -- ================================================================
+    local JerkGroup = Tabs.Misc:AddSection("Troll Tools")
+    
+    local jorkinLoop = nil
+    
+    JerkGroup:AddButton({
+        Title = "Give Jerk Tool",
+        Callback = function()
+            local backpack = LocalPlayer:FindFirstChildOfClass("Backpack")
+            local myChar = LocalPlayer.Character
+            local myHum = myChar and myChar:FindFirstChildOfClass("Humanoid")
+            if not backpack or not myHum then
+                Fluent:Notify({ Title = "Jerk Tool", Content = "Failed to give tool. Character/Backpack not found.", Duration = 3 })
+                return 
+            end
+
+            local tool = Instance.new("Tool")
+            tool.Name = "Jerk Off"
+            tool.ToolTip = "in the stripped club. straight up \"jorking it\" . and by \"it\" , haha, well. let's justr say. My peanits."
+            tool.RequiresHandle = false
+            tool.Parent = backpack
+
+            local jorkin = false
+            local track = nil
+
+            local function stopTomfoolery()
+                jorkin = false
+                if track then
+                    track:Stop()
+                    track = nil
+                end
+                if jorkinLoop then
+                    task.cancel(jorkinLoop)
+                    jorkinLoop = nil
+                end
+            end
+
+            tool.Equipped:Connect(function() 
+                jorkin = true 
+                jorkinLoop = task.spawn(function()
+                    while jorkin and task.wait() do
+                        if not myHum or not myHum.Parent then break end
+                        local isR15 = myHum.RigType == Enum.HumanoidRigType.R15
+                        
+                        if not track then
+                            local anim = Instance.new("Animation")
+                            anim.AnimationId = not isR15 and "rbxassetid://72042024" or "rbxassetid://698251653"
+                            
+                            local animator = myHum:FindFirstChildOfClass("Animator")
+                            if not animator then
+                                animator = Instance.new("Animator")
+                                animator.Parent = myHum
+                            end
+                            track = animator:LoadAnimation(anim)
+                        end
+
+                        track:Play()
+                        track:AdjustSpeed(isR15 and 0.7 or 0.65)
+                        track.TimePosition = 0.6
+                        
+                        task.wait(0.1)
+                        local targetTime = not isR15 and 0.65 or 0.7
+                        while track and track.TimePosition < targetTime do 
+                            task.wait(0.1) 
+                        end
+                        
+                        if track then
+                            track:Stop()
+                            track = nil
+                        end
+                    end
+                end)
+            end)
+            
+            tool.Unequipped:Connect(stopTomfoolery)
+            myHum.Died:Connect(stopTomfoolery)
+            
+            Fluent:Notify({ Title = "Jerk Tool", Content = "Tool added to backpack!", Duration = 3 })
+        end
+    })
+
 end
 
 -- ================================================================
@@ -1336,13 +2214,13 @@ SaveManager:SetLibrary(Fluent)
 InterfaceManager:SetLibrary(Fluent)
 SaveManager:IgnoreThemeSettings()
 SaveManager:SetIgnoreIndexes({})
-InterfaceManager:SetFolder("FluentScriptHub")
-SaveManager:SetFolder("FluentScriptHub/configs")
+InterfaceManager:SetFolder("28th6Hub")
+SaveManager:SetFolder("28th6Hub/configs")
 InterfaceManager:BuildInterfaceSection(Tabs.Settings)
 SaveManager:BuildConfigSection(Tabs.Settings)
 
 Window:SelectTab(1)
 
-Fluent:Notify({ Title = "Script Hub", Content = "Loaded successfully! ⚡", Duration = 5 })
+Fluent:Notify({ Title = "28th6", Content = "Loaded successfully! ⚡", Duration = 5 })
 
 SaveManager:LoadAutoloadConfig()
